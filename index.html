@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador Kumiko 3D</title>
+    <!-- Tailwind CSS para el diseño -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React y ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+    <!-- Babel para compilar JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Three.js para 3D -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/STLExporter.js"></script>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans h-screen overflow-hidden">
+    <div id="root" class="h-full"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function App() {
+            // Estados para las medidas y parámetros
+            const [width, setWidth] = useState(150); // Ancho en mm
+            const [height, setHeight] = useState(200); // Alto en mm
+            const [gridSize, setGridSize] = useState(25); // Tamaño aproximado de la celda
+            const [thickness, setThickness] = useState(2); // Grosor de las líneas
+            const [depth, setDepth] = useState(5); // Profundidad (Z) de la impresión
+
+            // Nuevos estados para paneles
+            const [panelCols, setPanelCols] = useState(1);
+            const [panelRows, setPanelRows] = useState(1);
+            const [visualGap, setVisualGap] = useState(5);
+            const [exportSelection, setExportSelection] = useState('all');
+
+            const mountRef = useRef(null);
+            const sceneRef = useRef(null);
+            const cameraRef = useRef(null);
+            const rendererRef = useRef(null);
+            const meshGroupRef = useRef(null);
+            const panelsRef = useRef([]); // Referencias a cada panel para exportar
+
+            // Inicializar Three.js
+            useEffect(() => {
+                const width = mountRef.current.clientWidth;
+                const height = mountRef.current.clientHeight;
+
+                const scene = new THREE.Scene();
+                scene.background = new THREE.Color(0xf0f0f0);
+                sceneRef.current = scene;
+
+                const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+                camera.position.set(0, 0, 300);
+                cameraRef.current = camera;
+
+                const renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(width, height);
+                // Iluminación suave
+                renderer.shadowMap.enabled = true;
+                mountRef.current.appendChild(renderer.domElement);
+                rendererRef.current = renderer;
+
+                const controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+
+                // Luces
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                scene.add(ambientLight);
+
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+                dirLight.position.set(100, 100, 200);
+                scene.add(dirLight);
+
+                // Grupo para contener el kumiko
+                const meshGroup = new THREE.Group();
+                scene.add(meshGroup);
+                meshGroupRef.current = meshGroup;
+
+                const animate = () => {
+                    requestAnimationFrame(animate);
+                    controls.update();
+                    renderer.render(scene, camera);
+                };
+                animate();
+
+                const handleResize = () => {
+                    if (mountRef.current && rendererRef.current && cameraRef.current) {
+                        const newWidth = mountRef.current.clientWidth;
+                        const newHeight = mountRef.current.clientHeight;
+                        rendererRef.current.setSize(newWidth, newHeight);
+                        cameraRef.current.aspect = newWidth / newHeight;
+                        cameraRef.current.updateProjectionMatrix();
+                    }
+                };
+                window.addEventListener('resize', handleResize);
+
+                return () => {
+                    window.removeEventListener('resize', handleResize);
+                    mountRef.current.removeChild(renderer.domElement);
+                };
+            }, []);
+
+            // Generar geometría cuando cambian los parámetros
+            useEffect(() => {
+                if (!meshGroupRef.current) return;
+
+                const group = meshGroupRef.current;
+                // Limpiar geometría anterior
+                while(group.children.length > 0){ 
+                    const child = group.children[0];
+                    group.remove(child); 
+                    // Limpiar recursivamente si es un grupo (como los paneles)
+                    if(child.type === 'Group') {
+                        child.children.forEach(c => {
+                            if(c.geometry) c.geometry.dispose();
+                            if(c.material) c.material.dispose();
+                        });
+                    } else {
+                        if(child.geometry) child.geometry.dispose();
+                        if(child.material) child.material.dispose();
+                    }
+                }
+                
+                panelsRef.current = [];
+
+                const pw = width / panelCols;
+                const ph = height / panelRows;
+
+                const colsPerPanel = Math.max(1, Math.round(pw / gridSize));
+                const rowsPerPanel = Math.max(1, Math.round(ph / gridSize));
+                
+                const cellW = pw / colsPerPanel;
+                const cellH = ph / rowsPerPanel;
+
+                // Reducido un poco para que los extremos de la diagonal no sobresalgan de las uniones compartidas
+                const diagLength = Math.sqrt(cellW*cellW + cellH*cellH) - thickness*0.8; 
+                const angle = Math.atan2(cellH, cellW);
+
+                for (let px = 0; px < panelCols; px++) {
+                    for (let py = 0; py < panelRows; py++) {
+                        const panelGroup = new THREE.Group();
+                        const panelName = `Panel ${px+1}x${py+1}`;
+                        panelGroup.userData = { px, py, name: panelName };
+
+                        // Alternar colores ligeramente para visualizar las divisiones
+                        const isEven = (px + py) % 2 === 0;
+                        const material = new THREE.MeshLambertMaterial({ color: isEven ? 0xe6c280 : 0xd4ae6a });
+
+                        const createBarLocal = (w, h, d, x, y, rotationZ = 0) => {
+                            const geometry = new THREE.BoxGeometry(w, h, d);
+                            const mesh = new THREE.Mesh(geometry, material);
+                            mesh.position.set(x, y, 0);
+                            mesh.rotation.z = rotationZ;
+                            panelGroup.add(mesh);
+                        };
+
+                        // Grosores de borde: mitad si tocan otro panel, completo si es el borde exterior del cuadro
+                        const tTop = py === panelRows - 1 ? thickness : thickness / 2;
+                        const tBot = py === 0 ? thickness : thickness / 2;
+                        const tLeft = px === 0 ? thickness : thickness / 2;
+                        const tRight = px === panelCols - 1 ? thickness : thickness / 2;
+
+                        // 1. Marco del panel
+                        createBarLocal(pw, tTop, depth, 0, ph/2 - tTop/2); // Arriba
+                        createBarLocal(pw, tBot, depth, 0, -ph/2 + tBot/2); // Abajo
+                        
+                        const innerH = ph - tTop - tBot;
+                        createBarLocal(tLeft, innerH, depth, -pw/2 + tLeft/2, (tBot - tTop)/2); // Izquierda
+                        createBarLocal(tRight, innerH, depth, pw/2 - tRight/2, (tBot - tTop)/2); // Derecha
+
+                        // 2. Cuadrícula interior
+                        for (let i = 1; i < colsPerPanel; i++) {
+                            const x = -pw/2 + i * cellW;
+                            createBarLocal(thickness, ph, depth, x, 0);
+                        }
+                        for (let j = 1; j < rowsPerPanel; j++) {
+                            const y = -ph/2 + j * cellH;
+                            createBarLocal(pw, thickness, depth, 0, y);
+                        }
+
+                        // 3. Diagonales
+                        for (let i = 0; i < colsPerPanel; i++) {
+                            for (let j = 0; j < rowsPerPanel; j++) {
+                                const centerX = -pw/2 + i * cellW + cellW / 2;
+                                const centerY = -ph/2 + j * cellH + cellH / 2;
+                                
+                                createBarLocal(diagLength, thickness, depth, centerX, centerY, angle);
+                                createBarLocal(diagLength, thickness, depth, centerX, centerY, -angle);
+                            }
+                        }
+
+                        // Posicionar el panel con la separación visual
+                        const centerX = (px - (panelCols - 1) / 2) * (pw + visualGap);
+                        const centerY = (py - (panelRows - 1) / 2) * (ph + visualGap);
+                        panelGroup.position.set(centerX, centerY, 0);
+
+                        group.add(panelGroup);
+                        panelsRef.current.push(panelGroup);
+                    }
+                }
+
+            }, [width, height, gridSize, thickness, depth, panelCols, panelRows, visualGap]);
+
+            // Exportar a STL
+            const exportSTL = () => {
+                const exporter = new THREE.STLExporter();
+                let stlString;
+                let filename;
+
+                if (exportSelection === 'all') {
+                    // Exportar todo tal cual se ve (incluye gaps)
+                    stlString = exporter.parse(sceneRef.current);
+                    filename = `kumiko_completo_${width}x${height}.stl`;
+                } else {
+                    // Buscar el panel seleccionado
+                    const panel = panelsRef.current.find(p => p.userData.name === exportSelection);
+                    if (panel) {
+                        // Centrar temporalmente el panel en el mundo (0,0,0) para imprimir
+                        const originalPos = panel.position.clone();
+                        panel.position.set(0, 0, 0);
+                        panel.updateMatrixWorld(true);
+                        
+                        stlString = exporter.parse(panel);
+                        filename = `kumiko_${exportSelection.replace(/ /g, '_')}.stl`;
+                        
+                        // Restaurar posición original para que la UI no se rompa
+                        panel.position.copy(originalPos);
+                        panel.updateMatrixWorld(true);
+                    } else {
+                        return; // Prevención por si no encuentra el panel
+                    }
+                }
+                
+                const blob = new Blob([stlString], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.style.display = 'none';
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            return (
+                <div className="flex h-full">
+                    {/* Panel lateral de controles */}
+                    <div className="w-80 bg-white p-6 shadow-xl z-10 flex flex-col overflow-y-auto">
+                        <h1 className="text-2xl font-bold mb-6 text-gray-800 border-b pb-2">Generador Kumiko</h1>
+                        
+                        <div className="space-y-4 flex-grow">
+                            <h2 className="text-sm font-bold text-gray-500 uppercase">Medidas Totales</h2>
+                            <div className="flex gap-2">
+                                <div className="w-1/2">
+                                    <label className="block text-xs font-medium text-gray-700">Ancho (mm)</label>
+                                    <input type="number" value={width} onChange={e => setWidth(Number(e.target.value))} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm focus:ring-blue-500 focus:border-blue-500" />
+                                </div>
+                                <div className="w-1/2">
+                                    <label className="block text-xs font-medium text-gray-700">Alto (mm)</label>
+                                    <input type="number" value={height} onChange={e => setHeight(Number(e.target.value))} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm focus:ring-blue-500 focus:border-blue-500" />
+                                </div>
+                            </div>
+
+                            <hr className="my-4"/>
+
+                            <h2 className="text-sm font-bold text-gray-500 uppercase">División en Planchas</h2>
+                            <p className="text-xs text-gray-500">Divide el cuadro en partes para impresoras pequeñas. Los bordes internos se ajustarán a la mitad para encajar perfecto.</p>
+                            
+                            <div className="flex gap-2">
+                                <div className="w-1/2">
+                                    <label className="block text-xs font-medium text-gray-700">Columnas (X)</label>
+                                    <input type="number" min="1" value={panelCols} onChange={e => setPanelCols(Math.max(1, Number(e.target.value)))} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm focus:ring-blue-500 focus:border-blue-500" />
+                                </div>
+                                <div className="w-1/2">
+                                    <label className="block text-xs font-medium text-gray-700">Filas (Y)</label>
+                                    <input type="number" min="1" value={panelRows} onChange={e => setPanelRows(Math.max(1, Number(e.target.value)))} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm focus:ring-blue-500 focus:border-blue-500" />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700">Separación Visual en 3D (mm)</label>
+                                <input type="range" min="0" max="20" value={visualGap} onChange={e => setVisualGap(Number(e.target.value))} className="w-full" />
+                            </div>
+
+                            <hr className="my-4"/>
+                            
+                            <h2 className="text-sm font-bold text-gray-500 uppercase">Diseño del Patrón</h2>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Tamaño aprox. celda (mm)</label>
+                                <input type="range" min="15" max="100" value={gridSize} onChange={e => setGridSize(Number(e.target.value))} className="w-full" />
+                                <div className="text-right text-sm text-gray-600">{gridSize} mm</div>
+                            </div>
+
+                            <div className="flex gap-2">
+                                <div className="w-1/2">
+                                    <label className="block text-xs font-medium text-gray-700">Grosor línea</label>
+                                    <input type="number" step="0.5" value={thickness} onChange={e => setThickness(Number(e.target.value))} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm focus:ring-blue-500 focus:border-blue-500" />
+                                </div>
+                                <div className="w-1/2">
+                                    <label className="block text-xs font-medium text-gray-700">Altura Z (3D)</label>
+                                    <input type="number" step="1" value={depth} onChange={e => setDepth(Number(e.target.value))} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm focus:ring-blue-500 focus:border-blue-500" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 pt-4 border-t border-gray-200">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Seleccionar para Exportar:</label>
+                            <select 
+                                value={exportSelection} 
+                                onChange={e => setExportSelection(e.target.value)}
+                                className="block w-full border border-gray-300 rounded-md shadow-sm p-2 mb-3 text-sm focus:ring-blue-500 focus:border-blue-500"
+                            >
+                                <option value="all">Todo el conjunto</option>
+                                {Array.from({ length: panelCols }).flatMap((_, x) => 
+                                    Array.from({ length: panelRows }).map((_, y) => (
+                                        <option key={`${x}-${y}`} value={`Panel ${x+1}x${y+1}`}>
+                                            Panel {x+1}x{y+1} (centrado para imprimir)
+                                        </option>
+                                    ))
+                                )}
+                            </select>
+
+                            <button 
+                                onClick={exportSTL}
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition-colors shadow-md flex justify-center items-center gap-2"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                Exportar .STL
+                            </button>
+                            <p className="text-xs text-center text-gray-500 mt-2">Soporta arrastrar el mouse para rotar y rueda para hacer zoom en la vista 3D.</p>
+                        </div>
+                    </div>
+
+                    {/* Contenedor Three.js */}
+                    <div className="flex-grow relative bg-gray-200 cursor-move" ref={mountRef}>
+                        {/* Instrucciones flotantes */}
+                        <div className="absolute top-4 left-4 bg-white/80 p-2 rounded shadow text-sm pointer-events-none">
+                            Click izquierdo: Rotar | Rueda: Zoom | Click derecho: Mover
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
