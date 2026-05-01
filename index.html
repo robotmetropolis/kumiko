@@ -839,6 +839,11 @@
                                         <div className="flex justify-between mt-1"><span>Ancho del patrón:</span> <b>{innerW.toFixed(1)} mm</b></div>
                                         <div className="flex justify-between"><span>Alto del patrón:</span> <b>{innerH.toFixed(1)} mm</b></div>
                                         
+                                        <div className="flex justify-between mt-1 pt-1 border-t border-slate-200 text-indigo-700">
+                                            <span title="Incluye los triángulos cortados a la mitad en los bordes">Total de triángulos (Píxeles):</span> 
+                                            <b className="text-[13px]">{validPatternCols * validPatternRows * 2}</b>
+                                        </div>
+
                                         <div className="mt-2 bg-white border border-gray-200 p-1.5 rounded">
                                             <div className="flex justify-between text-[11px]">
                                                 <span className="text-gray-500">Relación (Ancho/Alto):</span> 
