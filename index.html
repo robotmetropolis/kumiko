@@ -16,8 +16,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
-    <!-- fflate es requerido para comprimir el archivo 3MF -->
-    <script src="https://unpkg.com/fflate@0.8.0"></script>
+    <!-- fflate (UMD) es requerido globalmente por el exportador 3MF y para crear archivos ZIP -->
+    <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/STLExporter.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/3MFExporter.js"></script>
 </head>
@@ -509,6 +509,48 @@
                 }
 
                 try {
+                    // --- CASO 1: Exportar TODOS los paneles por separado como archivos STL en un archivo ZIP ---
+                    if (format === 'stl' && exportSelection === 'all') {
+                        if (panelsRef.current.length === 0) {
+                            alert("Error: No hay paneles generados para exportar.");
+                            return;
+                        }
+
+                        if (!window.fflate || !window.fflate.zipSync) {
+                            throw new Error("El motor de compresión ZIP no está cargado. Intenta de nuevo en unos segundos.");
+                        }
+
+                        const zipData = {};
+                        const exporter = new THREE.STLExporter();
+
+                        panelsRef.current.forEach(p => {
+                            const exportScene = new THREE.Scene();
+                            const clone = p.clone();
+                            clone.position.set(0, 0, 0); // Centrar para impresión individual
+                            exportScene.add(clone);
+                            
+                            const stlString = exporter.parse(exportScene);
+                            // Convertir string STL a Uint8Array para fflate
+                            const stlBuffer = new TextEncoder().encode(stlString);
+                            const safeName = p.userData.name.replace(/ /g, '_');
+                            zipData[`kumiko_${safeName}.stl`] = stlBuffer;
+                        });
+
+                        const zipped = window.fflate.zipSync(zipData);
+                        const blob = new Blob([zipped], { type: 'application/zip' });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.style.display = 'none';
+                        link.href = url;
+                        link.download = `kumiko_PANELES_SEPARADOS_${validWidth}x${validHeight}.zip`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        
+                        return; // Se detiene la ejecución ya que ya descargamos el ZIP
+                    }
+
+                    // --- CASOS NORMALES (Un solo archivo) ---
                     let fileStringOrBuffer;
                     let filename;
                     let mimeType;
@@ -523,6 +565,7 @@
                         exportScene.add(singleMeshRef.current.clone());
                         filename = `kumiko_ENTERO_SINCORTES_${validWidth}x${validHeight}.${format}`;
                     } else if (exportSelection === 'all') {
+                        // (Este caso aplica cuando exportas "Modelo Completo" en formato .3MF)
                         if (panelsRef.current.length === 0) {
                             alert("Error: No hay paneles generados para exportar.");
                             return;
@@ -533,10 +576,10 @@
                             const py = p.userData.py;
                             const trueX = (px - (panelCols - 1) / 2) * pw;
                             const trueY = (py - (panelRows - 1) / 2) * ph;
-                            clone.position.set(trueX, trueY, 0);
+                            clone.position.set(trueX, trueY, 0); // Posiciones relativas
                             exportScene.add(clone);
                         });
-                        filename = `kumiko_multi_paneles_${validWidth}x${validHeight}.${format}`;
+                        filename = `kumiko_MULTI_PANELES_${validWidth}x${validHeight}.${format}`;
                     } else {
                         const panel = panelsRef.current.find(p => p.userData.name === exportSelection);
                         if (panel) {
@@ -552,9 +595,10 @@
 
                     if (format === '3mf') {
                         if (typeof THREE['3MFExporter'] === 'undefined') {
-                            throw new Error("El exportador 3MF no cargó correctamente. Intenta usar .STL");
+                            throw new Error("El exportador 3MF no cargó correctamente. Verifica tu conexión a internet.");
                         }
                         const exporter = new THREE['3MFExporter']();
+                        // 3MFExporter de Three.js devuelve un Uint8Array directamente usando window.fflate
                         fileStringOrBuffer = exporter.parse(exportScene);
                         mimeType = 'application/vnd.ms-3mfdocument';
                     } else {
