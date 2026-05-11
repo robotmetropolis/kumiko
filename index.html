@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador Kumiko Interactivo Pro</title>
+    <title>Generador Kumiko Interactivo Pro V2</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
@@ -37,7 +37,6 @@
 
         // --- FUNCIÓN MATEMÁTICA EXACTA PARA EL INTERIOR DEL TRIÁNGULO ---
         const getInnerTriangle = (p1, p2, p3, baseThickness, gap) => {
-            // El desplazamiento total de cada arista hacia el centro
             const offset = (baseThickness / 2) + gap;
             
             const a = p2.distanceTo(p3);
@@ -47,23 +46,19 @@
             
             if (perimeter === 0) return [p1, p2, p3];
 
-            // Cálculo del Incentro (Centro de la circunferencia inscrita)
+            // Incentro
             const incenter = new THREE.Vector2(
                 (a * p1.x + b * p2.x + c * p3.x) / perimeter,
                 (a * p1.y + b * p2.y + c * p3.y) / perimeter
             );
             
-            // Fórmula de Herón para el Área y el Inradio
+            // Fórmula de Herón
             const s = perimeter / 2;
             const area = Math.sqrt(Math.max(0, s * (s - a) * (s - b) * (s - c)));
             const inradius = area / s;
             
-            // Si el triángulo es tan pequeño que el grosor lo desaparece
-            if (inradius <= offset) {
-                return [incenter.clone(), incenter.clone(), incenter.clone()];
-            }
+            if (inradius <= offset) return [incenter.clone(), incenter.clone(), incenter.clone()];
             
-            // Escalar el triángulo desde el incentro manteniendo la proporción exacta
             const scale = (inradius - offset) / inradius;
             
             return [
@@ -71,6 +66,48 @@
                 incenter.clone().add(p2.clone().sub(incenter).multiplyScalar(scale)),
                 incenter.clone().add(p3.clone().sub(incenter).multiplyScalar(scale))
             ];
+        };
+
+        // --- ALGORITMO SUTHERLAND-HODGMAN PARA RECORTAR EXCEDENTES DEL INFILL ---
+        const clipPolygonAgainstConvex = (subject, clipper) => {
+            let outputList = subject;
+            for (let i = 0; i < clipper.length; i++) {
+                const clipEdgeStart = clipper[i];
+                const clipEdgeEnd = clipper[(i + 1) % clipper.length];
+                const inputList = outputList;
+                outputList = [];
+                if (inputList.length === 0) break;
+
+                // Verifica si un punto está hacia el "adentro" del borde de recorte (Orden Antihorario)
+                const isInside = (p) => {
+                    return (clipEdgeEnd.x - clipEdgeStart.x) * (p.y - clipEdgeStart.y) - (clipEdgeEnd.y - clipEdgeStart.y) * (p.x - clipEdgeStart.x) >= -1e-6; 
+                };
+
+                const computeIntersection = (s, e) => {
+                    const dx1 = e.x - s.x, dy1 = e.y - s.y;
+                    const dx2 = clipEdgeEnd.x - clipEdgeStart.x, dy2 = clipEdgeEnd.y - clipEdgeStart.y;
+                    const den = dx1 * dy2 - dy1 * dx2;
+                    if (Math.abs(den) < 1e-6) return s; 
+                    const t = ((s.x - clipEdgeStart.x) * dy2 - (s.y - clipEdgeStart.y) * dx2) / den;
+                    return new THREE.Vector2(s.x + t * dx1, s.y + t * dy1);
+                };
+
+                for (let j = 0; j < inputList.length; j++) {
+                    const currentPoint = inputList[j];
+                    const prevPoint = inputList[(j - 1 + inputList.length) % inputList.length];
+
+                    const curInside = isInside(currentPoint);
+                    const prevInside = isInside(prevPoint);
+
+                    if (curInside) {
+                        if (!prevInside) outputList.push(computeIntersection(prevPoint, currentPoint));
+                        outputList.push(currentPoint);
+                    } else if (prevInside) {
+                        outputList.push(computeIntersection(prevPoint, currentPoint));
+                    }
+                }
+            }
+            return outputList;
         };
 
         function App() {
@@ -104,7 +141,7 @@
             const [activeTool, setActiveTool] = useState('asanoha'); 
             const [activeColor, setActiveColor] = useState(WOOD_COLORS[2].hex); 
             const [infillThickness, setInfillThickness] = useState(1.5);
-            const [clearance, setClearance] = useState(0.15); // NUEVO: Tolerancia de Encastre
+            const [clearance, setClearance] = useState(0.15); 
             const [customDesign, setCustomDesign] = useState({}); 
             const customDesignRef = useRef({});
 
@@ -354,12 +391,16 @@
                 let startJ = showBorders ? 0 : 1;
                 let endJ = showBorders ? validPatternRows : validPatternRows - 1;
 
-                // Líneas Base (Jigumi)
+                // -------------------------------------------------------------
+                // LÍNEAS BASE (JIGUMI) - Estas pueden interponerse o cruzarse sin problema
+                // -------------------------------------------------------------
                 for (let j = startJ; j <= endJ; j++) rawSegments.push({ A: new THREE.Vector2(PXmin, PYmin + j * cellH), B: new THREE.Vector2(PXmax, PYmin + j * cellH), isMain: true });
                 for (let k = -validPatternRows - 2; k <= validPatternCols + 2; k++) rawSegments.push({ A: new THREE.Vector2(PXmin + k * cellW, PYmin), B: new THREE.Vector2(PXmin + k * cellW + validPatternRows * (cellW / 2), PYmax), isMain: true });
                 for (let k = -2; k <= validPatternCols + validPatternRows + 2; k++) rawSegments.push({ A: new THREE.Vector2(PXmin + k * cellW, PYmin), B: new THREE.Vector2(PXmin + k * cellW - validPatternRows * (cellW / 2), PYmax), isMain: true });
 
-                // Procesamiento de Piezas Internas con Matemática de Incentro
+                // -------------------------------------------------------------
+                // PROCESAMIENTO DE INFILL: Generación de Polígonos de Precisión
+                // -------------------------------------------------------------
                 Object.entries(customDesignRef.current).forEach(([id, data]) => {
                     const parts = id.split('_');
                     const type = parts[0], k = parseInt(parts[1]), j = parseInt(parts[2]);
@@ -375,23 +416,41 @@
                         orig_v3 = getVertex(k, j+1, PXmin, PYmin); 
                     }
                     
-                    // APLICAMOS LA REDUCCIÓN MATEMÁTICA EXACTA AL ESPACIO INTERIOR
+                    // Límites Interiores Estrictos del Triángulo Actual
                     let [v1, v2, v3] = getInnerTriangle(orig_v1, orig_v2, orig_v3, thickness, validClearance);
+                    const clipperPoly = [v1, v2, v3];
                     
+                    // Función constructora con CORTADORA DE POLÍGONOS incorporada
+                    const addInfill = (A, B) => {
+                        let dx = B.x - A.x, dy = B.y - A.y;
+                        let len = Math.sqrt(dx*dx + dy*dy);
+                        if (len < 0.001) return;
+                        let nx = -dy/len, ny = dx/len;
+                        let t = validInfillThickness / 2; // Grosor de línea hacia cada lado
+                        // Construimos el rectángulo base de la línea
+                        let poly = [
+                            new THREE.Vector2(A.x + nx*t, A.y + ny*t),
+                            new THREE.Vector2(B.x + nx*t, B.y + ny*t),
+                            new THREE.Vector2(B.x - nx*t, B.y - ny*t),
+                            new THREE.Vector2(A.x - nx*t, A.y - ny*t)
+                        ];
+                        // RECORTAMOS cualquier exceso que sobresalga de la barrera interior del triángulo
+                        poly = clipPolygonAgainstConvex(poly, clipperPoly);
+                        if (poly.length >= 3) {
+                            rawPolygons.push({ vertices: poly, color: data.color });
+                        }
+                    };
+
                     let c = new THREE.Vector2((v1.x+v2.x+v3.x)/3, (v1.y+v2.y+v3.y)/3);
                     let m1 = new THREE.Vector2((v1.x+v2.x)/2, (v1.y+v2.y)/2);
                     let m2 = new THREE.Vector2((v2.x+v3.x)/2, (v2.y+v3.y)/2);
                     let m3 = new THREE.Vector2((v3.x+v1.x)/2, (v3.y+v1.y)/2);
 
                     if (data.type === 'asanoha') {
-                        rawSegments.push({ A: c, B: v1, isMain: false, color: data.color });
-                        rawSegments.push({ A: c, B: v2, isMain: false, color: data.color });
-                        rawSegments.push({ A: c, B: v3, isMain: false, color: data.color });
+                        addInfill(c, v1); addInfill(c, v2); addInfill(c, v3);
                     } 
                     else if (data.type === 'estrella') {
-                        rawSegments.push({ A: m1, B: m2, isMain: false, color: data.color });
-                        rawSegments.push({ A: m2, B: m3, isMain: false, color: data.color });
-                        rawSegments.push({ A: m3, B: m1, isMain: false, color: data.color });
+                        addInfill(m1, m2); addInfill(m2, m3); addInfill(m3, m1);
                     }
                     else if (data.type === 'hexagono') {
                         let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3);
@@ -400,12 +459,8 @@
                         let p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
                         let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3);
                         let p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
-                        rawSegments.push({ A: p1, B: p2, isMain: false, color: data.color });
-                        rawSegments.push({ A: p2, B: p3, isMain: false, color: data.color });
-                        rawSegments.push({ A: p3, B: p4, isMain: false, color: data.color });
-                        rawSegments.push({ A: p4, B: p5, isMain: false, color: data.color });
-                        rawSegments.push({ A: p5, B: p6, isMain: false, color: data.color });
-                        rawSegments.push({ A: p6, B: p1, isMain: false, color: data.color });
+                        addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
+                        addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
                     }
                     else if (data.type === 'sakura') {
                         let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3);
@@ -414,41 +469,27 @@
                         let p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
                         let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3);
                         let p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
-                        rawSegments.push({ A: p1, B: p2, isMain: false, color: data.color });
-                        rawSegments.push({ A: p2, B: p3, isMain: false, color: data.color });
-                        rawSegments.push({ A: p3, B: p4, isMain: false, color: data.color });
-                        rawSegments.push({ A: p4, B: p5, isMain: false, color: data.color });
-                        rawSegments.push({ A: p5, B: p6, isMain: false, color: data.color });
-                        rawSegments.push({ A: p6, B: p1, isMain: false, color: data.color });
-                        rawSegments.push({ A: m1, B: new THREE.Vector2((p1.x+p2.x)/2, (p1.y+p2.y)/2), isMain: false, color: data.color });
-                        rawSegments.push({ A: m2, B: new THREE.Vector2((p3.x+p4.x)/2, (p3.y+p4.y)/2), isMain: false, color: data.color });
-                        rawSegments.push({ A: m3, B: new THREE.Vector2((p5.x+p6.x)/2, (p5.y+p6.y)/2), isMain: false, color: data.color });
+                        addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
+                        addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
+                        addInfill(m1, new THREE.Vector2((p1.x+p2.x)/2, (p1.y+p2.y)/2));
+                        addInfill(m2, new THREE.Vector2((p3.x+p4.x)/2, (p3.y+p4.y)/2));
+                        addInfill(m3, new THREE.Vector2((p5.x+p6.x)/2, (p5.y+p6.y)/2));
                     }
                     else if (data.type === 'kikko') {
                         let p1 = v1.clone().lerp(v2, 1/3), p2 = v1.clone().lerp(v2, 2/3);
                         let p3 = v2.clone().lerp(v3, 1/3), p4 = v2.clone().lerp(v3, 2/3);
                         let p5 = v3.clone().lerp(v1, 1/3), p6 = v3.clone().lerp(v1, 2/3);
-                        rawSegments.push({ A: p1, B: p2, isMain: false, color: data.color });
-                        rawSegments.push({ A: p2, B: p3, isMain: false, color: data.color });
-                        rawSegments.push({ A: p3, B: p4, isMain: false, color: data.color });
-                        rawSegments.push({ A: p4, B: p5, isMain: false, color: data.color });
-                        rawSegments.push({ A: p5, B: p6, isMain: false, color: data.color });
-                        rawSegments.push({ A: p6, B: p1, isMain: false, color: data.color });
-                        rawSegments.push({ A: c, B: p1, isMain: false, color: data.color });
-                        rawSegments.push({ A: c, B: p3, isMain: false, color: data.color });
-                        rawSegments.push({ A: c, B: p5, isMain: false, color: data.color });
+                        addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
+                        addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
+                        addInfill(c, p1); addInfill(c, p3); addInfill(c, p5);
                     }
                     else if (data.type === 'goma') {
-                        rawSegments.push({ A: m1, B: m3, isMain: false, color: data.color }); 
-                        rawSegments.push({ A: v1, B: m2, isMain: false, color: data.color }); 
+                        addInfill(m1, m3); addInfill(v1, m2); 
                     }
                     else if (data.type === 'bishamon') {
-                        rawSegments.push({ A: c, B: m1, isMain: false, color: data.color });
-                        rawSegments.push({ A: c, B: m2, isMain: false, color: data.color });
-                        rawSegments.push({ A: c, B: m3, isMain: false, color: data.color });
+                        addInfill(c, m1); addInfill(c, m2); addInfill(c, m3);
                     }
                     else if (data.type === 'pleno') {
-                        // Como v1, v2 y v3 ya están reducidos matemáticamente, el pleno simplemente usa el espacio restante
                         rawPolygons.push({ vertices: [v1, v2, v3], color: data.color });
                     }
                 });
@@ -473,7 +514,7 @@
                             if (len < 0.001) return;
 
                             let dir = new THREE.Vector2(dx/len, dy/len);
-                            let baseT = seg.isMain ? thickness : validInfillThickness;
+                            let baseT = thickness; // Ahora solo pasa isMain por aquí
 
                             const getAdjust = (P) => {
                                 let hitsX = (Math.abs(Math.abs(P.x) - GLx) < eps);
@@ -488,7 +529,6 @@
                                     }
                                     return -Math.min(delta, baseT * 2);
                                 } else {
-                                    if (!seg.isMain) return 0;
                                     let touchesPanelBoundary = (
                                         Math.abs(P.x - box.minX) < eps || Math.abs(P.x - box.maxX) < eps ||
                                         Math.abs(P.y - box.minY) < eps || Math.abs(P.y - box.maxY) < eps
@@ -521,11 +561,7 @@
                             m4.setPosition(midX - offX, midY - offY, 0);
                             geo.applyMatrix4(m4);
                             
-                            if (seg.isMain) geosByColor.main.push(geo);
-                            else {
-                                if(!geosByColor[seg.color]) geosByColor[seg.color] = [];
-                                geosByColor[seg.color].push(geo);
-                            }
+                            geosByColor.main.push(geo);
                         });
 
                         rawPolygons.forEach(poly => {
@@ -536,9 +572,10 @@
                                 for(let i=1; i<clipped.length; i++) shape.lineTo(clipped[i].x, clipped[i].y);
                                 shape.closePath();
                                 
-                                const extrudeSettings = { depth: validInfillThickness, bevelEnabled: false };
+                                // FIX: Usamos la profundidad (depth) real del cuadro, no el grosor del borde (validInfillThickness)
+                                const extrudeSettings = { depth: depth, bevelEnabled: false };
                                 const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-                                geo.translate(-offX, -offY, -validInfillThickness / 2); 
+                                geo.translate(-offX, -offY, -depth / 2); 
                                 
                                 if(!solidGeosByColor[poly.color]) solidGeosByColor[poly.color] = [];
                                 solidGeosByColor[poly.color].push(geo);
@@ -778,11 +815,29 @@
                 let v2_orig = new THREE.Vector2(cellW/2, -cellH/3);
                 let v3_orig = new THREE.Vector2(0, cellH*2/3);
 
-                // Aplicamos la misma matemática de reducción exacta
                 let [v1, v2, v3] = getInnerTriangle(v1_orig, v2_orig, v3_orig, thickness, validClearance);
 
-                const rawSegments = [];
                 const rawPolygons = [];
+                const clipperPoly = [v1, v2, v3];
+
+                // FIX: Ahora generamos polígonos recortados usando el clipper en vez de lineas crudas
+                const addInfill = (A, B) => {
+                    let dx = B.x - A.x, dy = B.y - A.y;
+                    let len = Math.sqrt(dx*dx + dy*dy);
+                    if (len < 0.001) return;
+                    let nx = -dy/len, ny = dx/len;
+                    let t = validInfillThickness / 2;
+                    let poly = [
+                        new THREE.Vector2(A.x + nx*t, A.y + ny*t),
+                        new THREE.Vector2(B.x + nx*t, B.y + ny*t),
+                        new THREE.Vector2(B.x - nx*t, B.y - ny*t),
+                        new THREE.Vector2(A.x - nx*t, A.y - ny*t)
+                    ];
+                    poly = clipPolygonAgainstConvex(poly, clipperPoly);
+                    if (poly.length >= 3) {
+                        rawPolygons.push({ vertices: poly, color: toolColor });
+                    }
+                };
 
                 let c = new THREE.Vector2((v1.x+v2.x+v3.x)/3, (v1.y+v2.y+v3.y)/3);
                 let m1 = new THREE.Vector2((v1.x+v2.x)/2, (v1.y+v2.y)/2);
@@ -790,62 +845,49 @@
                 let m3 = new THREE.Vector2((v3.x+v1.x)/2, (v3.y+v1.y)/2);
 
                 if (toolType === 'asanoha') {
-                    rawSegments.push({ A: c, B: v1 }); rawSegments.push({ A: c, B: v2 }); rawSegments.push({ A: c, B: v3 });
+                    addInfill(c, v1); addInfill(c, v2); addInfill(c, v3);
                 } else if (toolType === 'estrella') {
-                    rawSegments.push({ A: m1, B: m2 }); rawSegments.push({ A: m2, B: m3 }); rawSegments.push({ A: m3, B: m1 });
+                    addInfill(m1, m2); addInfill(m2, m3); addInfill(m3, m1);
                 } else if (toolType === 'hexagono') {
                     let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3), p2 = new THREE.Vector2(v1.x/3 + v2.x*2/3, v1.y/3 + v2.y*2/3);
                     let p3 = new THREE.Vector2(v2.x*2/3 + v3.x/3, v2.y*2/3 + v3.y/3), p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
                     let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3), p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
-                    rawSegments.push({ A: p1, B: p2 }); rawSegments.push({ A: p2, B: p3 }); rawSegments.push({ A: p3, B: p4 });
-                    rawSegments.push({ A: p4, B: p5 }); rawSegments.push({ A: p5, B: p6 }); rawSegments.push({ A: p6, B: p1 });
+                    addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
+                    addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
                 } else if (toolType === 'sakura') {
                     let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3), p2 = new THREE.Vector2(v1.x/3 + v2.x*2/3, v1.y/3 + v2.y*2/3);
                     let p3 = new THREE.Vector2(v2.x*2/3 + v3.x/3, v2.y*2/3 + v3.y/3), p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
                     let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3), p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
-                    rawSegments.push({ A: p1, B: p2 }); rawSegments.push({ A: p2, B: p3 }); rawSegments.push({ A: p3, B: p4 });
-                    rawSegments.push({ A: p4, B: p5 }); rawSegments.push({ A: p5, B: p6 }); rawSegments.push({ A: p6, B: p1 });
-                    rawSegments.push({ A: m1, B: new THREE.Vector2((p1.x+p2.x)/2, (p1.y+p2.y)/2) });
-                    rawSegments.push({ A: m2, B: new THREE.Vector2((p3.x+p4.x)/2, (p3.y+p4.y)/2) });
-                    rawSegments.push({ A: m3, B: new THREE.Vector2((p5.x+p6.x)/2, (p5.y+p6.y)/2) });
+                    addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
+                    addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
+                    addInfill(m1, new THREE.Vector2((p1.x+p2.x)/2, (p1.y+p2.y)/2));
+                    addInfill(m2, new THREE.Vector2((p3.x+p4.x)/2, (p3.y+p4.y)/2));
+                    addInfill(m3, new THREE.Vector2((p5.x+p6.x)/2, (p5.y+p6.y)/2));
                 } else if (toolType === 'kikko') {
                     let p1 = v1.clone().lerp(v2, 1/3), p2 = v1.clone().lerp(v2, 2/3);
                     let p3 = v2.clone().lerp(v3, 1/3), p4 = v2.clone().lerp(v3, 2/3);
                     let p5 = v3.clone().lerp(v1, 1/3), p6 = v3.clone().lerp(v1, 2/3);
-                    rawSegments.push({ A: p1, B: p2 }); rawSegments.push({ A: p2, B: p3 }); rawSegments.push({ A: p3, B: p4 });
-                    rawSegments.push({ A: p4, B: p5 }); rawSegments.push({ A: p5, B: p6 }); rawSegments.push({ A: p6, B: p1 });
-                    rawSegments.push({ A: c, B: p1 }); rawSegments.push({ A: c, B: p3 }); rawSegments.push({ A: c, B: p5 });
+                    addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
+                    addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
+                    addInfill(c, p1); addInfill(c, p3); addInfill(c, p5);
                 } else if (toolType === 'goma') {
-                    rawSegments.push({ A: m1, B: m3 }); rawSegments.push({ A: v1, B: m2 });
+                    addInfill(m1, m3); addInfill(v1, m2);
                 } else if (toolType === 'bishamon') {
-                    rawSegments.push({ A: c, B: m1 }); rawSegments.push({ A: c, B: m2 }); rawSegments.push({ A: c, B: m3 });
+                    addInfill(c, m1); addInfill(c, m2); addInfill(c, m3);
                 } else if (toolType === 'pleno') {
-                    rawPolygons.push({ vertices: [v1, v2, v3] });
+                    rawPolygons.push({ vertices: [v1, v2, v3], color: toolColor });
                 }
 
                 const material = new THREE.MeshBasicMaterial();
-
-                rawSegments.forEach(seg => {
-                    let dx = seg.B.x - seg.A.x, dy = seg.B.y - seg.A.y;
-                    let len = Math.sqrt(dx*dx + dy*dy);
-                    let ang = Math.atan2(dy, dx);
-                    let midX = (seg.A.x + seg.B.x) / 2, midY = (seg.A.y + seg.B.y) / 2;
-
-                    const geo = new THREE.BoxGeometry(len, baseT, depth);
-                    const m4 = new THREE.Matrix4();
-                    m4.makeRotationZ(ang);
-                    m4.setPosition(midX, midY, 0);
-                    geo.applyMatrix4(m4);
-                    scene.add(new THREE.Mesh(geo, material));
-                });
 
                 rawPolygons.forEach(poly => {
                     const shape = new THREE.Shape();
                     shape.moveTo(poly.vertices[0].x, poly.vertices[0].y);
                     for(let i=1; i<poly.vertices.length; i++) shape.lineTo(poly.vertices[i].x, poly.vertices[i].y);
                     shape.closePath();
-                    const geo = new THREE.ExtrudeGeometry(shape, { depth: baseT, bevelEnabled: false });
-                    geo.translate(0, 0, -baseT / 2);
+                    // FIX: Siempre extruimos con 'depth' en lugar de usar el grosor de línea 2D
+                    const geo = new THREE.ExtrudeGeometry(shape, { depth: depth, bevelEnabled: false });
+                    geo.translate(0, 0, -depth / 2);
                     scene.add(new THREE.Mesh(geo, material));
                 });
 
@@ -1247,7 +1289,7 @@
                                                 </div>
                                             )
                                         })}
-                                        <p className="text-[9px] text-amber-700 mt-2 leading-tight">Las piezas sueltas se auto-ajustan al grosor y tolerancia para que encajen perfectas en tu Jigumi.</p>
+                                        <p className="text-[9px] text-amber-700 mt-2 leading-tight">Las piezas sueltas ahora aplican matemática de corte por polígonos. Encajarán perfectas en tu Jigumi sin importar si los ángulos no son exactamente 60°.</p>
                                     </div>
                                 )}
                             </section>
