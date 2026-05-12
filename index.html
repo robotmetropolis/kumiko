@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador Kumiko Interactivo Pro V4.3</title>
+    <title>Generador Kumiko Interactivo Pro V4</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
@@ -34,6 +34,90 @@
             { id: 'verde', hex: '#228b22', name: 'Verde' },
             { id: 'azul', hex: '#0050ef', name: 'Azul Francia' }
         ];
+
+        // --- BIBLIOTECA DE PATRONES KUMIKO ---
+        const TOOLS = [
+            { id: 'asanoha', icon: '❄️', name: 'Asa-no-ha' },
+            { id: 'y_vert', icon: 'ꕤ', name: 'Y Vértices' },
+            { id: 'bishamon', icon: '⑈', name: 'Y Medios' },
+            { id: 'estrella', icon: '◬', name: 'Tri. Int.' },
+            { id: 'tri_y_mid', icon: '✡️', name: 'Tri + Y' },
+            { id: 'tri_y_vert', icon: '💠', name: 'Tri + Y Inv' },
+            { id: 'hexagono', icon: '⎔', name: 'Hexágono' },
+            { id: 'kikko', icon: '🐢', name: 'Kikko' },
+            { id: 'sakura', icon: '🌸', name: 'Sakura' },
+            { id: 'hex_y', icon: '🕸️', name: 'Hex + Y' },
+            { id: 'hex_y_vert', icon: '💠', name: 'Hex + Y Inv' },
+            { id: 'goma', icon: '🌾', name: 'Goma' },
+            { id: 'goma_3', icon: '🌀', name: 'Goma Twist' },
+            { id: 'med_v', icon: '⇡', name: 'Med. Vert' },
+            { id: 'med_d1', icon: '⤡', name: 'Med. Der' },
+            { id: 'med_d2', icon: '⤢', name: 'Med. Izq' },
+            { id: 'pleno', icon: '🔺', name: 'Pleno' },
+            { id: 'eraser', icon: '🧹', name: 'Borrar' }
+        ];
+
+        // --- MOTOR DE DIBUJO GEOMÉTRICO ---
+        const drawPattern = (type, v1, v2, v3, addInfill, addPolygon, color) => {
+            let c = new THREE.Vector2((v1.x+v2.x+v3.x)/3, (v1.y+v2.y+v3.y)/3);
+            let m1 = new THREE.Vector2((v1.x+v2.x)/2, (v1.y+v2.y)/2);
+            let m2 = new THREE.Vector2((v2.x+v3.x)/2, (v2.y+v3.y)/2);
+            let m3 = new THREE.Vector2((v3.x+v1.x)/2, (v3.y+v1.y)/2);
+
+            let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3);
+            let p2 = new THREE.Vector2(v1.x/3 + v2.x*2/3, v1.y/3 + v2.y*2/3);
+            let p3 = new THREE.Vector2(v2.x*2/3 + v3.x/3, v2.y*2/3 + v3.y/3);
+            let p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
+            let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3);
+            let p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
+
+            const hexLines = () => {
+                addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
+                addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
+            };
+
+            if (type === 'asanoha') {
+                addInfill(c, v1); addInfill(c, v2); addInfill(c, v3);
+                addInfill(c, m1); addInfill(c, m2); addInfill(c, m3);
+            } else if (type === 'y_vert') {
+                addInfill(c, v1); addInfill(c, v2); addInfill(c, v3);
+            } else if (type === 'bishamon') {
+                addInfill(c, m1); addInfill(c, m2); addInfill(c, m3);
+            } else if (type === 'estrella') {
+                addInfill(m1, m2); addInfill(m2, m3); addInfill(m3, m1);
+            } else if (type === 'tri_y_mid') {
+                addInfill(m1, m2); addInfill(m2, m3); addInfill(m3, m1);
+                addInfill(c, m1); addInfill(c, m2); addInfill(c, m3);
+            } else if (type === 'tri_y_vert') {
+                addInfill(m1, m2); addInfill(m2, m3); addInfill(m3, m1);
+                addInfill(c, v1); addInfill(c, v2); addInfill(c, v3);
+            } else if (type === 'hexagono') {
+                hexLines();
+            } else if (type === 'kikko') {
+                hexLines(); addInfill(c, p1); addInfill(c, p3); addInfill(c, p5);
+            } else if (type === 'sakura') {
+                hexLines();
+                addInfill(m1, new THREE.Vector2((p1.x+p2.x)/2, (p1.y+p2.y)/2));
+                addInfill(m2, new THREE.Vector2((p3.x+p4.x)/2, (p3.y+p4.y)/2));
+                addInfill(m3, new THREE.Vector2((p5.x+p6.x)/2, (p5.y+p6.y)/2));
+            } else if (type === 'hex_y') {
+                hexLines(); addInfill(c, m1); addInfill(c, m2); addInfill(c, m3);
+            } else if (type === 'hex_y_vert') {
+                hexLines(); addInfill(c, v1); addInfill(c, v2); addInfill(c, v3);
+            } else if (type === 'goma') {
+                addInfill(m1, m3); addInfill(v1, m2); 
+            } else if (type === 'goma_3') {
+                addInfill(v1, p3); addInfill(v2, p5); addInfill(v3, p1);
+            } else if (type === 'med_v') {
+                addInfill(m1, v3);
+            } else if (type === 'med_d1') {
+                addInfill(m2, v1);
+            } else if (type === 'med_d2') {
+                addInfill(m3, v2);
+            } else if (type === 'pleno') {
+                addPolygon([v1, v2, v3], color);
+            }
+        };
 
         const getInnerTriangle = (p1, p2, p3, baseThickness, gap) => {
             const offset = (baseThickness / 2) + gap;
@@ -457,57 +541,11 @@
                         }
                     };
 
-                    let c = new THREE.Vector2((v1.x+v2.x+v3.x)/3, (v1.y+v2.y+v3.y)/3);
-                    let m1 = new THREE.Vector2((v1.x+v2.x)/2, (v1.y+v2.y)/2);
-                    let m2 = new THREE.Vector2((v2.x+v3.x)/2, (v2.y+v3.y)/2);
-                    let m3 = new THREE.Vector2((v3.x+v1.x)/2, (v3.y+v1.y)/2);
+                    const addPolygon = (vertices, color) => {
+                        rawPolygons.push({ vertices: vertices, color: color });
+                    };
 
-                    if (data.type === 'asanoha') {
-                        addInfill(c, v1); addInfill(c, v2); addInfill(c, v3);
-                    } 
-                    else if (data.type === 'estrella') {
-                        addInfill(m1, m2); addInfill(m2, m3); addInfill(m3, m1);
-                    }
-                    else if (data.type === 'hexagono') {
-                        let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3);
-                        let p2 = new THREE.Vector2(v1.x/3 + v2.x*2/3, v1.y/3 + v2.y*2/3);
-                        let p3 = new THREE.Vector2(v2.x*2/3 + v3.x/3, v2.y*2/3 + v3.y/3);
-                        let p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
-                        let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3);
-                        let p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
-                        addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
-                        addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
-                    }
-                    else if (data.type === 'sakura') {
-                        let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3);
-                        let p2 = new THREE.Vector2(v1.x/3 + v2.x*2/3, v1.y/3 + v2.y*2/3);
-                        let p3 = new THREE.Vector2(v2.x*2/3 + v3.x/3, v2.y*2/3 + v3.y/3);
-                        let p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
-                        let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3);
-                        let p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
-                        addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
-                        addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
-                        addInfill(m1, new THREE.Vector2((p1.x+p2.x)/2, (p1.y+p2.y)/2));
-                        addInfill(m2, new THREE.Vector2((p3.x+p4.x)/2, (p3.y+p4.y)/2));
-                        addInfill(m3, new THREE.Vector2((p5.x+p6.x)/2, (p5.y+p6.y)/2));
-                    }
-                    else if (data.type === 'kikko') {
-                        let p1 = v1.clone().lerp(v2, 1/3), p2 = v1.clone().lerp(v2, 2/3);
-                        let p3 = v2.clone().lerp(v3, 1/3), p4 = v2.clone().lerp(v3, 2/3);
-                        let p5 = v3.clone().lerp(v1, 1/3), p6 = v3.clone().lerp(v1, 2/3);
-                        addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
-                        addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
-                        addInfill(c, p1); addInfill(c, p3); addInfill(c, p5);
-                    }
-                    else if (data.type === 'goma') {
-                        addInfill(m1, m3); addInfill(v1, m2); 
-                    }
-                    else if (data.type === 'bishamon') {
-                        addInfill(c, m1); addInfill(c, m2); addInfill(c, m3);
-                    }
-                    else if (data.type === 'pleno') {
-                        rawPolygons.push({ vertices: [v1, v2, v3], color: data.color });
-                    }
+                    drawPattern(data.type, v1, v2, v3, addInfill, addPolygon, data.color);
                 });
 
                 const createGeosForBox = (box, offX, offY, isPanel = true) => {
@@ -925,46 +963,12 @@
                     }
                 };
 
-                let c = new THREE.Vector2((v1.x+v2.x+v3.x)/3, (v1.y+v2.y+v3.y)/3);
-                let m1 = new THREE.Vector2((v1.x+v2.x)/2, (v1.y+v2.y)/2);
-                let m2 = new THREE.Vector2((v2.x+v3.x)/2, (v2.y+v3.y)/2);
-                let m3 = new THREE.Vector2((v3.x+v1.x)/2, (v3.y+v1.y)/2);
-
-                if (item.type === 'asanoha') {
-                    addInfill(c, v1); addInfill(c, v2); addInfill(c, v3);
-                } else if (item.type === 'estrella') {
-                    addInfill(m1, m2); addInfill(m2, m3); addInfill(m3, m1);
-                } else if (item.type === 'hexagono') {
-                    let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3), p2 = new THREE.Vector2(v1.x/3 + v2.x*2/3, v1.y/3 + v2.y*2/3);
-                    let p3 = new THREE.Vector2(v2.x*2/3 + v3.x/3, v2.y*2/3 + v3.y/3), p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
-                    let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3), p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
-                    addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
-                    addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
-                } else if (item.type === 'sakura') {
-                    let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3), p2 = new THREE.Vector2(v1.x/3 + v2.x*2/3, v1.y/3 + v2.y*2/3);
-                    let p3 = new THREE.Vector2(v2.x*2/3 + v3.x/3, v2.y*2/3 + v3.y/3), p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
-                    let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3), p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
-                    addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
-                    addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
-                    addInfill(m1, new THREE.Vector2((p1.x+p2.x)/2, (p1.y+p2.y)/2));
-                    addInfill(m2, new THREE.Vector2((p3.x+p4.x)/2, (p3.y+p4.y)/2));
-                    addInfill(m3, new THREE.Vector2((p5.x+p6.x)/2, (p5.y+p6.y)/2));
-                } else if (item.type === 'kikko') {
-                    let p1 = v1.clone().lerp(v2, 1/3), p2 = v1.clone().lerp(v2, 2/3);
-                    let p3 = v2.clone().lerp(v3, 1/3), p4 = v2.clone().lerp(v3, 2/3);
-                    let p5 = v3.clone().lerp(v1, 1/3), p6 = v3.clone().lerp(v1, 2/3);
-                    addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
-                    addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
-                    addInfill(c, p1); addInfill(c, p3); addInfill(c, p5);
-                } else if (item.type === 'goma') {
-                    addInfill(m1, m3); addInfill(v1, m2);
-                } else if (item.type === 'bishamon') {
-                    addInfill(c, m1); addInfill(c, m2); addInfill(c, m3);
-                } else if (item.type === 'pleno') {
-                    let poly = [v1, v2, v3];
-                    poly = clipPolygonAABB(poly, clipBox);
+                const addPolygon = (vertices, color) => {
+                    let poly = clipPolygonAABB(vertices, clipBox);
                     if (poly.length >= 3) rawPolygons.push(poly);
-                }
+                };
+
+                drawPattern(item.type, v1, v2, v3, addInfill, addPolygon, toolColor);
 
                 let totalMinX = Infinity, totalMaxX = -Infinity;
                 let totalMinY = Infinity, totalMaxY = -Infinity;
@@ -1369,34 +1373,18 @@
 
                                     <section>
                                         <h2 className="font-bold text-emerald-700 uppercase mb-2">Piezas Tradicionales</h2>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            <button onClick={() => setActiveTool('asanoha')} className={`flex flex-col items-center p-2 rounded border ${activeTool === 'asanoha' ? 'bg-emerald-100 border-emerald-500 shadow-inner' : 'bg-white hover:bg-gray-50'}`} title="Asa-no-ha">
-                                                <span className="text-lg">🌸</span><span className="font-bold text-[9px] mt-1 text-center truncate w-full">Asa-no-ha</span>
-                                            </button>
-                                            <button onClick={() => setActiveTool('sakura')} className={`flex flex-col items-center p-2 rounded border ${activeTool === 'sakura' ? 'bg-emerald-100 border-emerald-500 shadow-inner' : 'bg-white hover:bg-gray-50'}`} title="Sakura (Cerezo)">
-                                                <span className="text-lg">💮</span><span className="font-bold text-[9px] mt-1 text-center truncate w-full">Sakura</span>
-                                            </button>
-                                            <button onClick={() => setActiveTool('kikko')} className={`flex flex-col items-center p-2 rounded border ${activeTool === 'kikko' ? 'bg-emerald-100 border-emerald-500 shadow-inner' : 'bg-white hover:bg-gray-50'}`} title="Kikko (Tortuga)">
-                                                <span className="text-lg">🐢</span><span className="font-bold text-[9px] mt-1 text-center truncate w-full">Kikko</span>
-                                            </button>
-                                            <button onClick={() => setActiveTool('goma')} className={`flex flex-col items-center p-2 rounded border ${activeTool === 'goma' ? 'bg-emerald-100 border-emerald-500 shadow-inner' : 'bg-white hover:bg-gray-50'}`} title="Goma (Sésamo)">
-                                                <span className="text-lg">🌾</span><span className="font-bold text-[9px] mt-1 text-center truncate w-full">Goma</span>
-                                            </button>
-                                            <button onClick={() => setActiveTool('bishamon')} className={`flex flex-col items-center p-2 rounded border ${activeTool === 'bishamon' ? 'bg-emerald-100 border-emerald-500 shadow-inner' : 'bg-white hover:bg-gray-50'}`} title="Bishamon Kikko">
-                                                <span className="text-lg">🛡️</span><span className="font-bold text-[9px] mt-1 text-center truncate w-full">Bishamon</span>
-                                            </button>
-                                            <button onClick={() => setActiveTool('hexagono')} className={`flex flex-col items-center p-2 rounded border ${activeTool === 'hexagono' ? 'bg-emerald-100 border-emerald-500 shadow-inner' : 'bg-white hover:bg-gray-50'}`} title="Hexágono">
-                                                <span className="text-lg">⬡</span><span className="font-bold text-[9px] mt-1 text-center truncate w-full">Hexágono</span>
-                                            </button>
-                                            <button onClick={() => setActiveTool('estrella')} className={`flex flex-col items-center p-2 rounded border ${activeTool === 'estrella' ? 'bg-emerald-100 border-emerald-500 shadow-inner' : 'bg-white hover:bg-gray-50'}`} title="Estrella Menor">
-                                                <span className="text-lg">✡️</span><span className="font-bold text-[9px] mt-1 text-center truncate w-full">Estrella</span>
-                                            </button>
-                                            <button onClick={() => setActiveTool('pleno')} className={`flex flex-col items-center p-2 rounded border ${activeTool === 'pleno' ? 'bg-emerald-100 border-emerald-500 shadow-inner' : 'bg-white hover:bg-gray-50'}`} title="Triángulo Sólido">
-                                                <span className="text-lg">🔺</span><span className="font-bold text-[9px] mt-1 text-center truncate w-full">Pleno</span>
-                                            </button>
-                                            <button onClick={() => setActiveTool('eraser')} className={`flex flex-col items-center p-2 rounded border ${activeTool === 'eraser' ? 'bg-red-100 border-red-500 shadow-inner' : 'bg-white hover:bg-red-50'}`} title="Borrar">
-                                                <span className="text-lg">🧹</span><span className="font-bold text-[9px] mt-1 text-red-700 text-center truncate w-full">Borrar</span>
-                                            </button>
+                                        <div className="grid grid-cols-3 gap-2 overflow-y-auto max-h-60 pr-1 pb-1">
+                                            {TOOLS.map(tool => (
+                                                <button 
+                                                    key={'tool_'+tool.id} 
+                                                    onClick={() => setActiveTool(tool.id)} 
+                                                    className={`flex flex-col items-center p-2 rounded border ${activeTool === tool.id ? (tool.id === 'eraser' ? 'bg-red-100 border-red-500 shadow-inner' : 'bg-emerald-100 border-emerald-500 shadow-inner') : (tool.id === 'eraser' ? 'bg-white hover:bg-red-50' : 'bg-white hover:bg-gray-50')}`} 
+                                                    title={tool.name}
+                                                >
+                                                    <span className="text-lg">{tool.icon}</span>
+                                                    <span className={`font-bold text-[9px] mt-1 text-center truncate w-full ${tool.id === 'eraser' ? 'text-red-700' : 'text-gray-700'}`}>{tool.name}</span>
+                                                </button>
+                                            ))}
                                         </div>
                                     </section>
 
