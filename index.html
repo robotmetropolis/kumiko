@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador Kumiko Interactivo Pro V2</title>
+    <title>Generador Kumiko Interactivo Pro V4</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
@@ -46,13 +46,11 @@
             
             if (perimeter === 0) return [p1, p2, p3];
 
-            // Incentro
             const incenter = new THREE.Vector2(
                 (a * p1.x + b * p2.x + c * p3.x) / perimeter,
                 (a * p1.y + b * p2.y + c * p3.y) / perimeter
             );
             
-            // Fórmula de Herón
             const s = perimeter / 2;
             const area = Math.sqrt(Math.max(0, s * (s - a) * (s - b) * (s - c)));
             const inradius = area / s;
@@ -78,7 +76,6 @@
                 outputList = [];
                 if (inputList.length === 0) break;
 
-                // Verifica si un punto está hacia el "adentro" del borde de recorte (Orden Antihorario)
                 const isInside = (p) => {
                     return (clipEdgeEnd.x - clipEdgeStart.x) * (p.y - clipEdgeStart.y) - (clipEdgeEnd.y - clipEdgeStart.y) * (p.x - clipEdgeStart.x) >= -1e-6; 
                 };
@@ -111,32 +108,29 @@
         };
 
         function App() {
-            // 1. Cama de Impresión
-            const [bedWidth, setBedWidth] = useState(250);
-            const [bedHeight, setBedHeight] = useState(250);
-
-            // 2. Medidas del Cuadro
-            const [width, setWidth] = useState(388); 
-            const [height, setHeight] = useState(488); 
+            // 1. Medidas del Cuadro Base
+            const [width, setWidth] = useState(400); 
+            const [height, setHeight] = useState(500); 
             
-            // 3. Guías de Corte
+            // 2. Guías de Corte
             const [panelCols, setPanelCols] = useState(2);
             const [panelRows, setPanelRows] = useState(2);
             const [showGuides, setShowGuides] = useState(true);
             const [exportSelection, setExportSelection] = useState('single');
             const [exportBase, setExportBase] = useState(true); 
             
-            // 4. Estados del patrón Jigumi Base
-            const [triangleSide, setTriangleSide] = useState(43.5); 
-            const [patternCols, setPatternCols] = useState(10);      
-            const [patternRows, setPatternRows] = useState(14);     
+            // 3. Estados del patrón Jigumi Base (MALLA ESTRICTA DE 60°)
+            const [patternMode, setPatternMode] = useState('perfect'); // 'perfect', 'cols', 'rows', 'manual'
+            const [patternCols, setPatternCols] = useState(9); 
+            const [patternRows, setPatternRows] = useState(13); 
+            const [manualPitch, setManualPitch] = useState(43.5); 
             const [thickness, setThickness] = useState(3);          
             const [depth, setDepth] = useState(5);
             const [showBorders, setShowBorders] = useState(true);
-            const [isAutoFit, setIsAutoFit] = useState(true); 
+            const [frameMargin, setFrameMargin] = useState(5); 
             const [mainColor, setMainColor] = useState(WOOD_COLORS[0].hex); 
 
-            // 5. Diseño Libre (INTERACTIVO)
+            // 4. Diseño Libre (INTERACTIVO)
             const [designMode, setDesignMode] = useState(false);
             const [activeTool, setActiveTool] = useState('asanoha'); 
             const [activeColor, setActiveColor] = useState(WOOD_COLORS[2].hex); 
@@ -173,29 +167,66 @@
             const longPressTimerRef = useRef(null);
             const lastHoveredIdRef = useRef(null);
 
-            // Valores numéricos seguros
+            // --- LÓGICA MATEMÁTICA CENTRAL DE ENCAJE PERFECTO ---
             const validWidth = Number(width) || 0;
             const validHeight = Number(height) || 0;
-            const validTriangleSide = Number(triangleSide) || 43.5;
-            const validPatternCols = Number(patternCols) || 1;
-            const validPatternRows = Number(patternRows) || 1;
             const validInfillThickness = Number(infillThickness) || 1.5;
             const validClearance = Number(clearance) || 0;
+            const validFrameMargin = Number(frameMargin) || 0;
 
-            const hasValidDimensions = validWidth > 0 && validHeight > 0;
-
-            const pw = validWidth > 0 ? validWidth / panelCols : 0;
-            const ph = validHeight > 0 ? validHeight / panelRows : 0;
             const SQRT3 = Math.sqrt(3);
+
+            let actualWidth = validWidth;
+            let actualHeight = validHeight;
+            let finalPitch = Number(manualPitch) || 43.5;
             
-            const targetInnerW = showBorders ? Math.max(0, validWidth - thickness * 2) : validWidth;
-            const targetInnerH = showBorders ? Math.max(0, validHeight - thickness * 2) : validHeight;
+            let targetInnerW, targetInnerH;
+            let marginX = showBorders ? validFrameMargin : 0;
+            let marginY = showBorders ? validFrameMargin : 0;
+            let derivedCols = patternCols;
+            let derivedRows = patternRows;
 
-            const cellW = isAutoFit ? (validPatternCols > 0 ? targetInnerW / validPatternCols : 0) : validTriangleSide;
-            const cellH = isAutoFit ? (validPatternRows > 0 ? targetInnerH / validPatternRows : 0) : (validTriangleSide * SQRT3 / 2);
+            // En el modo 'perfect', el cuadro se mantiene y el MARCO absorbe la diferencia (Asegurando solapa mínima)
+            if (patternMode === 'perfect') {
+                const availableW = Math.max(0, validWidth - validFrameMargin * 2);
+                const availableH = Math.max(0, validHeight - validFrameMargin * 2);
+                
+                derivedCols = Math.max(1, Math.floor(availableW / finalPitch));
+                derivedRows = Math.max(1, Math.floor(availableH / (finalPitch * SQRT3 / 2)));
+                
+                targetInnerW = derivedCols * finalPitch;
+                targetInnerH = derivedRows * finalPitch * SQRT3 / 2;
+                
+                if (showBorders) {
+                    // Calculamos la solapa exacta sumando el margen mínimo y el sobrante dividido 2
+                    marginX = (actualWidth - targetInnerW) / 2;
+                    marginY = (actualHeight - targetInnerH) / 2;
+                }
+            } else {
+                targetInnerW = showBorders ? Math.max(0, validWidth - validFrameMargin * 2) : validWidth;
+                targetInnerH = showBorders ? Math.max(0, validHeight - validFrameMargin * 2) : validHeight;
+                
+                if (patternMode === 'cols' && patternCols > 0) {
+                    finalPitch = targetInnerW / patternCols;
+                } else if (patternMode === 'rows' && patternRows > 0) {
+                    finalPitch = targetInnerH / (patternRows * (SQRT3 / 2));
+                }
+            }
 
-            const innerW = validPatternCols * cellW;
-            const innerH = validPatternRows * cellH;
+            const hasValidDimensions = actualWidth > 0 && actualHeight > 0;
+
+            const cellW = finalPitch;
+            const cellH = finalPitch * SQRT3 / 2;
+
+            // Calculamos cuántas celdas se necesitan en total
+            const gridCols = Math.ceil(targetInnerW / cellW) + 2;
+            const gridRows = Math.ceil(targetInnerH / cellH) + 2;
+            
+            const pw = actualWidth > 0 ? actualWidth / panelCols : 0;
+            const ph = actualHeight > 0 ? actualHeight / panelRows : 0;
+
+            const innerW = gridCols * cellW;
+            const innerH = gridRows * cellH;
 
             // Inicializar Three.js
             useEffect(() => {
@@ -293,27 +324,26 @@
                 singleMeshRef.current = null;
                 panelsRef.current = [];
 
-                const GLx = validWidth / 2;
-                const GLy = validHeight / 2;
-                const borderT = showBorders ? thickness : 0;
+                const GLx = actualWidth / 2;
+                const GLy = actualHeight / 2;
 
                 const PXmin = -innerW / 2;
                 const PXmax = innerW / 2;
                 const PYmin = -innerH / 2;
                 const PYmax = innerH / 2;
 
-                const renderMinX = Math.max(-GLx + borderT, PXmin);
-                const renderMaxX = Math.min(GLx - borderT, PXmax);
-                const renderMinY = Math.max(-GLy + borderT, PYmin);
-                const renderMaxY = Math.min(GLy - borderT, PYmax);
+                const renderMinX = Math.max(-GLx + marginX, -targetInnerW/2);
+                const renderMaxX = Math.min(GLx - marginX, targetInnerW/2);
+                const renderMinY = Math.max(-GLy + marginY, -targetInnerH/2);
+                const renderMaxY = Math.min(GLy - marginY, targetInnerH/2);
 
                 if (designMode) {
                     const hitboxMat = new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0, side: THREE.DoubleSide });
-                    const marginX = cellW * 1.5;
-                    const marginY = cellH * 1.5;
+                    const marginX = cellW;
+                    const marginY = cellH;
 
-                    for (let j = -1; j <= validPatternRows + 1; j++) {
-                        for (let k = -validPatternRows - 2; k <= validPatternCols + 2; k++) {
+                    for (let j = 0; j <= gridRows; j++) {
+                        for (let k = -gridRows - 2; k <= gridCols + 2; k++) {
                             let u1 = getVertex(k, j, PXmin, PYmin);
                             let u2 = getVertex(k+1, j, PXmin, PYmin);
                             let u3 = getVertex(k, j+1, PXmin, PYmin);
@@ -388,19 +418,17 @@
 
                 const rawSegments = [];
                 const rawPolygons = [];
-                let startJ = showBorders ? 0 : 1;
-                let endJ = showBorders ? validPatternRows : validPatternRows - 1;
 
-                // -------------------------------------------------------------
-                // LÍNEAS BASE (JIGUMI) - Estas pueden interponerse o cruzarse sin problema
-                // -------------------------------------------------------------
-                for (let j = startJ; j <= endJ; j++) rawSegments.push({ A: new THREE.Vector2(PXmin, PYmin + j * cellH), B: new THREE.Vector2(PXmax, PYmin + j * cellH), isMain: true });
-                for (let k = -validPatternRows - 2; k <= validPatternCols + 2; k++) rawSegments.push({ A: new THREE.Vector2(PXmin + k * cellW, PYmin), B: new THREE.Vector2(PXmin + k * cellW + validPatternRows * (cellW / 2), PYmax), isMain: true });
-                for (let k = -2; k <= validPatternCols + validPatternRows + 2; k++) rawSegments.push({ A: new THREE.Vector2(PXmin + k * cellW, PYmin), B: new THREE.Vector2(PXmin + k * cellW - validPatternRows * (cellW / 2), PYmax), isMain: true });
+                for (let j = 0; j <= gridRows; j++) {
+                    rawSegments.push({ A: new THREE.Vector2(PXmin, PYmin + j * cellH), B: new THREE.Vector2(PXmax, PYmin + j * cellH), isMain: true });
+                }
+                for (let k = -gridRows - 2; k <= gridCols + 2; k++) {
+                    rawSegments.push({ A: new THREE.Vector2(PXmin + k * cellW, PYmin), B: new THREE.Vector2(PXmin + k * cellW + gridRows * (cellW / 2), PYmax), isMain: true });
+                }
+                for (let k = -2; k <= gridCols + gridRows + 2; k++) {
+                    rawSegments.push({ A: new THREE.Vector2(PXmin + k * cellW, PYmin), B: new THREE.Vector2(PXmin + k * cellW - gridRows * (cellW / 2), PYmax), isMain: true });
+                }
 
-                // -------------------------------------------------------------
-                // PROCESAMIENTO DE INFILL: Generación de Polígonos de Precisión
-                // -------------------------------------------------------------
                 Object.entries(customDesignRef.current).forEach(([id, data]) => {
                     const parts = id.split('_');
                     const type = parts[0], k = parseInt(parts[1]), j = parseInt(parts[2]);
@@ -416,25 +444,21 @@
                         orig_v3 = getVertex(k, j+1, PXmin, PYmin); 
                     }
                     
-                    // Límites Interiores Estrictos del Triángulo Actual
                     let [v1, v2, v3] = getInnerTriangle(orig_v1, orig_v2, orig_v3, thickness, validClearance);
                     const clipperPoly = [v1, v2, v3];
                     
-                    // Función constructora con CORTADORA DE POLÍGONOS incorporada
                     const addInfill = (A, B) => {
                         let dx = B.x - A.x, dy = B.y - A.y;
                         let len = Math.sqrt(dx*dx + dy*dy);
                         if (len < 0.001) return;
                         let nx = -dy/len, ny = dx/len;
-                        let t = validInfillThickness / 2; // Grosor de línea hacia cada lado
-                        // Construimos el rectángulo base de la línea
+                        let t = validInfillThickness / 2;
                         let poly = [
                             new THREE.Vector2(A.x + nx*t, A.y + ny*t),
                             new THREE.Vector2(B.x + nx*t, B.y + ny*t),
                             new THREE.Vector2(B.x - nx*t, B.y - ny*t),
                             new THREE.Vector2(A.x - nx*t, A.y - ny*t)
                         ];
-                        // RECORTAMOS cualquier exceso que sobresalga de la barrera interior del triángulo
                         poly = clipPolygonAgainstConvex(poly, clipperPoly);
                         if (poly.length >= 3) {
                             rawPolygons.push({ vertices: poly, color: data.color });
@@ -514,7 +538,7 @@
                             if (len < 0.001) return;
 
                             let dir = new THREE.Vector2(dx/len, dy/len);
-                            let baseT = thickness; // Ahora solo pasa isMain por aquí
+                            let baseT = thickness; 
 
                             const getAdjust = (P) => {
                                 let hitsX = (Math.abs(Math.abs(P.x) - GLx) < eps);
@@ -572,7 +596,6 @@
                                 for(let i=1; i<clipped.length; i++) shape.lineTo(clipped[i].x, clipped[i].y);
                                 shape.closePath();
                                 
-                                // FIX: Usamos la profundidad (depth) real del cuadro, no el grosor del borde (validInfillThickness)
                                 const extrudeSettings = { depth: depth, bevelEnabled: false };
                                 const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
                                 geo.translate(-offX, -offY, -depth / 2); 
@@ -633,7 +656,7 @@
 
                 for (let py = 0; py < panelRows; py++) {
                     for (let px = 0; px < panelCols; px++) {
-                        let cx = -validWidth/2 + pw/2 + px * pw, cy = -validHeight/2 + ph/2 + py * ph;
+                        let cx = -actualWidth/2 + pw/2 + px * pw, cy = -actualHeight/2 + ph/2 + py * ph;
                         const panelBox = { minX: cx - pw/2, maxX: cx + pw/2, minY: cy - ph/2, maxY: cy + ph/2 };
                         const geometries = createGeosForBox(panelBox, cx, cy, true);
                         
@@ -645,7 +668,7 @@
                     }
                 }
 
-                const fullGeometries = createGeosForBox({minX:-validWidth/2, maxX:validWidth/2, minY:-validHeight/2, maxY:validHeight/2}, 0, 0, false);
+                const fullGeometries = createGeosForBox({minX:-actualWidth/2, maxX:actualWidth/2, minY:-actualHeight/2, maxY:actualHeight/2}, 0, 0, false);
                 if (Object.values(fullGeometries.geosByColor).some(arr => arr.length > 0) || Object.values(fullGeometries.solidGeosByColor).some(arr => arr.length > 0)) {
                     singleMeshRef.current = createMeshGroup(fullGeometries, { name: 'Full' });
                     group.add(singleMeshRef.current);
@@ -656,7 +679,7 @@
             useEffect(() => {
                 customDesignRef.current = customDesign; 
                 buildGeometry();
-            }, [validWidth, validHeight, validTriangleSide, validPatternCols, validPatternRows, thickness, validInfillThickness, validClearance, depth, panelCols, panelRows, showBorders, isAutoFit, mainColor, customDesign, designMode]);
+            }, [actualWidth, actualHeight, finalPitch, targetInnerW, targetInnerH, marginX, marginY, thickness, validInfillThickness, validClearance, depth, panelCols, panelRows, showBorders, mainColor, customDesign, designMode]);
 
             useEffect(() => {
                 if (!guidesGroupRef.current) return;
@@ -673,20 +696,20 @@
                 const guideMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
 
                 for (let i = 1; i < panelCols; i++) {
-                    const cutX = -validWidth/2 + i * pw;
-                    const geo = new THREE.BoxGeometry(1.5, validHeight + 20, depth + 10);
+                    const cutX = -actualWidth/2 + i * pw;
+                    const geo = new THREE.BoxGeometry(1.5, actualHeight + 20, depth + 10);
                     const mesh = new THREE.Mesh(geo, guideMaterial);
                     mesh.position.set(cutX, 0, 0);
                     group.add(mesh);
                 }
                 for (let j = 1; j < panelRows; j++) {
-                    const cutY = -validHeight/2 + j * ph;
-                    const geo = new THREE.BoxGeometry(validWidth + 20, 1.5, depth + 10);
+                    const cutY = -actualHeight/2 + j * ph;
+                    const geo = new THREE.BoxGeometry(actualWidth + 20, 1.5, depth + 10);
                     const mesh = new THREE.Mesh(geo, guideMaterial);
                     mesh.position.set(0, cutY, 0);
                     group.add(mesh);
                 }
-            }, [validWidth, validHeight, panelCols, panelRows, pw, ph, showGuides, depth]);
+            }, [actualWidth, actualHeight, panelCols, panelRows, pw, ph, showGuides, depth]);
 
             const paintTriangle = (id) => {
                 setCustomDesign(prev => {
@@ -770,17 +793,6 @@
                 }
             };
 
-            const autoAdjustPattern = () => {
-                if (validWidth > 0 && validHeight > 0 && validTriangleSide > 0) {
-                    let targetW = validWidth - thickness * 2;
-                    let targetH = validHeight - thickness * 2;
-                    if (targetW < 0) targetW = validWidth;
-                    if (targetH < 0) targetH = validHeight;
-                    setPatternCols(Math.floor(targetW / validTriangleSide));
-                    setPatternRows(Math.floor(targetH / (validTriangleSide * Math.sqrt(3)/2)));
-                }
-            };
-
             const fillAllWithPattern = () => {
                 if(!hitboxesGroupRef.current) return;
                 const newDesign = { ...customDesign };
@@ -796,7 +808,6 @@
                 });
             };
 
-            // --- BOM Y EXPORTAR PIEZAS ÚNICAS ---
             const bomItems = useMemo(() => {
                 const counts = {};
                 Object.values(customDesign).forEach(d => {
@@ -809,8 +820,7 @@
 
             const exportSingleTool = (toolType, toolColor) => {
                 const scene = new THREE.Scene();
-                const baseT = validInfillThickness;
-
+                
                 let v1_orig = new THREE.Vector2(-cellW/2, -cellH/3);
                 let v2_orig = new THREE.Vector2(cellW/2, -cellH/3);
                 let v3_orig = new THREE.Vector2(0, cellH*2/3);
@@ -820,7 +830,6 @@
                 const rawPolygons = [];
                 const clipperPoly = [v1, v2, v3];
 
-                // FIX: Ahora generamos polígonos recortados usando el clipper en vez de lineas crudas
                 const addInfill = (A, B) => {
                     let dx = B.x - A.x, dy = B.y - A.y;
                     let len = Math.sqrt(dx*dx + dy*dy);
@@ -885,7 +894,6 @@
                     shape.moveTo(poly.vertices[0].x, poly.vertices[0].y);
                     for(let i=1; i<poly.vertices.length; i++) shape.lineTo(poly.vertices[i].x, poly.vertices[i].y);
                     shape.closePath();
-                    // FIX: Siempre extruimos con 'depth' en lugar de usar el grosor de línea 2D
                     const geo = new THREE.ExtrudeGeometry(shape, { depth: depth, bevelEnabled: false });
                     geo.translate(0, 0, -depth / 2);
                     scene.add(new THREE.Mesh(geo, material));
@@ -901,18 +909,18 @@
                 link.click();
             };
 
-            // --- JSON SAVE / LOAD ---
             const downloadJSON = () => {
                 const configObj = {
                     width, height, panelCols, panelRows,
-                    triangleSide, patternCols, patternRows, thickness, depth,
-                    showBorders, isAutoFit, mainColor, exportBase, infillThickness, clearance,
+                    patternMode, patternCols, patternRows, manualPitch,
+                    thickness, depth,
+                    showBorders, frameMargin, mainColor, exportBase, infillThickness, clearance,
                     customDesign
                 };
                 const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(configObj, null, 2));
                 const link = document.createElement("a");
                 link.href = dataStr;
-                link.download = `Kumiko_Proyecto_${width}x${height}.json`;
+                link.download = `Kumiko_Proyecto_${Math.round(actualWidth)}x${Math.round(actualHeight)}.json`;
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -929,13 +937,18 @@
                         if(parsed.height) setHeight(parsed.height);
                         if(parsed.panelCols) setPanelCols(parsed.panelCols);
                         if(parsed.panelRows) setPanelRows(parsed.panelRows);
-                        if(parsed.triangleSide) setTriangleSide(parsed.triangleSide);
-                        if(parsed.patternCols) setPatternCols(parsed.patternCols);
-                        if(parsed.patternRows) setPatternRows(parsed.patternRows);
+                        
+                        if (parsed.patternMode) {
+                            setPatternMode(parsed.patternMode);
+                            if(parsed.patternCols) setPatternCols(parsed.patternCols);
+                            if(parsed.patternRows) setPatternRows(parsed.patternRows);
+                            if(parsed.manualPitch) setManualPitch(parsed.manualPitch);
+                        }
+
                         if(parsed.thickness) setThickness(parsed.thickness);
                         if(parsed.depth) setDepth(parsed.depth);
                         if(parsed.showBorders !== undefined) setShowBorders(parsed.showBorders);
-                        if(parsed.isAutoFit !== undefined) setIsAutoFit(parsed.isAutoFit);
+                        if(parsed.frameMargin !== undefined) setFrameMargin(parsed.frameMargin);
                         if(parsed.mainColor) setMainColor(parsed.mainColor);
                         if(parsed.exportBase !== undefined) setExportBase(parsed.exportBase);
                         if(parsed.infillThickness) setInfillThickness(parsed.infillThickness);
@@ -988,14 +1001,14 @@
 
                         const blob = new Blob([window.fflate.zipSync(zip)], { type: 'application/zip' });
                         const link = document.createElement('a'); link.href = URL.createObjectURL(blob); 
-                        link.download = `Kumiko_Paneles_${validWidth}x${validHeight}.zip`; link.click();
+                        link.download = `Kumiko_Paneles_${Math.round(actualWidth)}x${Math.round(actualHeight)}.zip`; link.click();
                         return;
                     } else if (exportSelection === 'single') {
                         if (!singleMeshRef.current) return showAlert("La malla no está lista.");
                         const processedMesh = processMeshForExport(singleMeshRef.current);
                         if (processedMesh.children.length === 0) return showAlert("No hay geometría para exportar. ¡Pinta algún relleno o activa la estructura base!");
                         exportScene.add(processedMesh);
-                        filename = `Kumiko_ModeloEntero_${validWidth}x${validHeight}.${format}`;
+                        filename = `Kumiko_ModeloEntero_${Math.round(actualWidth)}x${Math.round(actualHeight)}.${format}`;
                     } else {
                         const panel = panelsRef.current.find(x => x.userData.name === exportSelection); 
                         if(!panel) return showAlert("Panel no encontrado.");
@@ -1033,8 +1046,6 @@
 
             return (
                 <div className="flex h-full relative text-xs">
-                    
-                    {/* CUSTOM ALERT / CONFIRM DIALOG */}
                     {dialog && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4">
                             <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm text-center">
@@ -1065,13 +1076,7 @@
                                     </button>
                                     
                                     <div className="relative">
-                                        <input 
-                                            type="file" 
-                                            accept=".json" 
-                                            onChange={uploadJSON} 
-                                            ref={fileInputRef}
-                                            className="hidden" 
-                                        />
+                                        <input type="file" accept=".json" onChange={uploadJSON} ref={fileInputRef} className="hidden" />
                                         <button onClick={() => fileInputRef.current.click()} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded text-sm font-bold transition-colors shadow-sm flex items-center justify-center gap-2">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                                             Cargar Proyecto (.json)
@@ -1121,10 +1126,18 @@
                             {!designMode ? (
                                 <div className="animate-fade-in space-y-4">
                                     <section>
-                                        <h2 className="font-bold text-blue-600 uppercase mb-2">1. Medidas Cuadro</h2>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <h2 className="font-bold text-blue-600 uppercase">1. Medidas Cuadro</h2>
+                                        </div>
                                         <div className="flex gap-2">
-                                            <div className="w-1/2"><label className="text-gray-400">Ancho (X)</label><input type="number" value={width} onChange={handleNumberInput(setWidth)} className="w-full border p-1 rounded font-bold" /></div>
-                                            <div className="w-1/2"><label className="text-gray-400">Alto (Y)</label><input type="number" value={height} onChange={handleNumberInput(setHeight)} className="w-full border p-1 rounded font-bold" /></div>
+                                            <div className="w-1/2">
+                                                <label className="text-gray-400">Ancho Final (X)</label>
+                                                <input type="number" value={width} onChange={handleNumberInput(setWidth)} className="w-full border p-1 rounded font-bold bg-white" />
+                                            </div>
+                                            <div className="w-1/2">
+                                                <label className="text-gray-400">Alto Final (Y)</label>
+                                                <input type="number" value={height} onChange={handleNumberInput(setHeight)} className="w-full border p-1 rounded font-bold bg-white" />
+                                            </div>
                                         </div>
                                     </section>
 
@@ -1144,26 +1157,93 @@
                                     </section>
                                     
                                     <section className="bg-blue-50 p-2 rounded border border-blue-100">
-                                        <h2 className="font-bold text-blue-700 uppercase mb-2">2. Patrón Base (Jigumi)</h2>
-                                        <label className="flex items-center gap-2 mb-2"><input type="checkbox" checked={showBorders} onChange={e => setShowBorders(e.target.checked)} /> Marco Sólido</label>
-                                        <label className="flex items-center gap-2 mb-2 text-blue-800 font-bold"><input type="checkbox" checked={isAutoFit} onChange={e => setIsAutoFit(e.target.checked)} /> Auto-encajar al Marco</label>
+                                        <h2 className="font-bold text-blue-700 uppercase mb-2">2. Patrón Base (Jigumi 60°)</h2>
                                         
-                                        {!isAutoFit && (
-                                            <div className="mb-2">
-                                                <label className="text-gray-500 font-bold">Pitch (Triángulo)</label>
-                                                <input type="number" step="0.5" value={triangleSide} onChange={handleNumberInput(setTriangleSide)} className="w-full border p-1 rounded font-mono" />
-                                            </div>
-                                        )}
-
-                                        <div className="flex gap-2 mb-2">
-                                            <div className="w-1/2"><label className="text-[10px] text-gray-400">Columnas (X)</label><input type="number" value={patternCols} onChange={handleNumberInput(setPatternCols)} className="w-full border p-1 rounded font-mono" /></div>
-                                            <div className="w-1/2"><label className="text-[10px] text-gray-400">Filas (Y)</label><input type="number" value={patternRows} onChange={handleNumberInput(setPatternRows)} className="w-full border p-1 rounded font-mono" /></div>
+                                        <div className="mb-2 bg-white p-2 border border-blue-200 rounded">
+                                            <label className="flex items-center gap-2 font-bold text-blue-900 mb-1">
+                                                <input type="checkbox" checked={showBorders} onChange={e => setShowBorders(e.target.checked)} className="accent-blue-600 w-4 h-4" /> 
+                                                Marco Sólido (Solapa Perimetral)
+                                            </label>
+                                            {showBorders && patternMode !== 'perfect' && (
+                                                <div className="mt-2 pl-6">
+                                                    <label className="text-gray-600 font-bold block mb-1 text-[10px]">Ancho de Solapa (mm)</label>
+                                                    <input type="number" step="0.5" value={frameMargin} onChange={handleNumberInput(setFrameMargin)} className="w-full border border-gray-300 p-1 rounded font-mono text-gray-700" />
+                                                    <p className="text-[9px] text-gray-500 mt-1">Margen sólido extra para quedar oculto bajo el contramarco.</p>
+                                                </div>
+                                            )}
                                         </div>
                                         
-                                        <button onClick={autoAdjustPattern} className="mt-1 mb-2 w-full text-[10px] bg-white hover:bg-gray-100 border py-1 rounded font-bold transition-colors">⚖️ Recalcular Cuadrícula</button>
-                                        
-                                        <div className="mt-2 flex gap-2">
-                                            <div className="w-1/2"><label className="text-[10px] text-gray-400">Grosor Principal</label><input type="number" step="0.5" value={thickness} onChange={handleNumberInput(setThickness)} className="w-full border p-1 rounded" /></div>
+                                        <div className="mb-2 bg-white p-2 border border-blue-200 rounded">
+                                            <label className="text-blue-900 font-bold block mb-1">Estrategia de Encaje (Cortes Perfectos)</label>
+                                            <select 
+                                                value={patternMode} 
+                                                onChange={e => setPatternMode(e.target.value)} 
+                                                className="w-full border border-blue-300 p-1.5 rounded mb-2 text-[11px] font-bold text-blue-800 bg-blue-50"
+                                            >
+                                                <option value="perfect">✨ Kumiko Perfecto (Solapa Dinámica)</option>
+                                                <option value="cols">Ajustar Ancho (Fijar Columnas)</option>
+                                                <option value="rows">Ajustar Alto (Fijar Filas)</option>
+                                                <option value="manual">Modo Manual (Recortes Aleatorios)</option>
+                                            </select>
+
+                                            {patternMode === 'perfect' && (
+                                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                                    <div className="col-span-2">
+                                                        <label className="text-gray-500 font-bold block mb-1 text-[10px]">Lado del Triángulo (Pitch en mm)</label>
+                                                        <input type="number" step="0.5" value={manualPitch} onChange={handleNumberInput(setManualPitch)} className="w-full border border-emerald-300 p-1.5 rounded font-mono font-bold text-emerald-700 bg-emerald-50" />
+                                                    </div>
+                                                    {showBorders && (
+                                                        <div className="col-span-2 bg-emerald-100 p-1.5 rounded mt-1 grid grid-cols-2 gap-2 text-center shadow-sm">
+                                                            <div>
+                                                                <p className="text-[10px] text-emerald-800 font-bold">Columnas: {derivedCols}</p>
+                                                                <p className="text-[10px] text-emerald-800">Solapa X: {marginX.toFixed(1)} mm</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-[10px] text-emerald-800 font-bold">Filas: {derivedRows}</p>
+                                                                <p className="text-[10px] text-emerald-800">Solapa Y: {marginY.toFixed(1)} mm</p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    <div className="col-span-2 text-[9px] text-emerald-600 mt-1 leading-tight border-t border-emerald-100 pt-1">
+                                                        <b>Nota:</b> Calcula cuántos triángulos enteros entran respetando tu solapa mínima de {validFrameMargin}mm. El remanente se suma a la solapa.
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {patternMode === 'cols' && (
+                                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                                    <div className="col-span-2">
+                                                        <label className="text-gray-500 font-bold block mb-1 text-[10px]">Columnas Exactas</label>
+                                                        <input type="number" value={patternCols} onChange={handleNumberInput(setPatternCols)} className="w-full border border-blue-300 p-1.5 rounded font-mono font-bold text-blue-700" />
+                                                    </div>
+                                                    <div className="col-span-2 bg-blue-100 p-1.5 rounded">
+                                                        <p className="text-[10px] text-blue-800 font-bold">Pitch Auto-calculado: {finalPitch.toFixed(2)} mm</p>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {patternMode === 'rows' && (
+                                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                                    <div className="col-span-2">
+                                                        <label className="text-gray-500 font-bold block mb-1 text-[10px]">Filas Exactas</label>
+                                                        <input type="number" value={patternRows} onChange={handleNumberInput(setPatternRows)} className="w-full border border-blue-300 p-1.5 rounded font-mono font-bold text-blue-700" />
+                                                    </div>
+                                                    <div className="col-span-2 bg-blue-100 p-1.5 rounded">
+                                                        <p className="text-[10px] text-blue-800 font-bold">Pitch Auto-calculado: {finalPitch.toFixed(2)} mm</p>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {patternMode === 'manual' && (
+                                                <div className="mt-2">
+                                                    <label className="text-gray-500 font-bold block mb-1 text-[10px]">Lado del Triángulo (Pitch en mm)</label>
+                                                    <input type="number" step="0.5" value={manualPitch} onChange={handleNumberInput(setManualPitch)} className="w-full border border-blue-300 p-1.5 rounded font-mono font-bold text-blue-700" />
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="flex gap-2">
+                                            <div className="w-1/2"><label className="text-[10px] text-gray-400">Grosor Líneas Interiores</label><input type="number" step="0.5" value={thickness} onChange={handleNumberInput(setThickness)} className="w-full border p-1 rounded" /></div>
                                             <div className="w-1/2"><label className="text-[10px] text-gray-400">Z (Altura 3D)</label><input type="number" value={depth} onChange={handleNumberInput(setDepth)} className="w-full border p-1 rounded" /></div>
                                         </div>
                                     </section>
@@ -1289,7 +1369,7 @@
                                                 </div>
                                             )
                                         })}
-                                        <p className="text-[9px] text-amber-700 mt-2 leading-tight">Las piezas sueltas ahora aplican matemática de corte por polígonos. Encajarán perfectas en tu Jigumi sin importar si los ángulos no son exactamente 60°.</p>
+                                        <p className="text-[9px] text-amber-700 mt-2 leading-tight">Las piezas sueltas son idénticas geométricamente. Al ser triángulos equiláteros puros, todas encajan perfecto.</p>
                                     </div>
                                 )}
                             </section>
