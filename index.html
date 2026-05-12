@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador Kumiko Interactivo Pro V4.1</title>
+    <title>Generador Kumiko Interactivo Pro V4.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
@@ -35,7 +35,6 @@
             { id: 'azul', hex: '#0050ef', name: 'Azul Francia' }
         ];
 
-        // --- FUNCIÓN MATEMÁTICA EXACTA PARA EL INTERIOR DEL TRIÁNGULO ---
         const getInnerTriangle = (p1, p2, p3, baseThickness, gap) => {
             const offset = (baseThickness / 2) + gap;
             
@@ -66,7 +65,6 @@
             ];
         };
 
-        // --- ALGORITMO SUTHERLAND-HODGMAN PARA RECORTAR EXCEDENTES DEL INFILL ---
         const clipPolygonAgainstConvex = (subject, clipper) => {
             let outputList = subject;
             for (let i = 0; i < clipper.length; i++) {
@@ -85,7 +83,9 @@
                     const dx2 = clipEdgeEnd.x - clipEdgeStart.x, dy2 = clipEdgeEnd.y - clipEdgeStart.y;
                     const den = dx1 * dy2 - dy1 * dx2;
                     if (Math.abs(den) < 1e-6) return s; 
-                    const t = ((s.x - clipEdgeStart.x) * dy2 - (s.y - clipEdgeStart.y) * dx2) / den;
+                    
+                    // CORRECCIÓN MATEMÁTICA: La fórmula de intersección ahora resuelve correctamente los vectores hacia el centro de la pieza
+                    const t = ((s.y - clipEdgeStart.y) * dx2 - (s.x - clipEdgeStart.x) * dy2) / den;
                     return new THREE.Vector2(s.x + t * dx1, s.y + t * dy1);
                 };
 
@@ -107,6 +107,28 @@
             return outputList;
         };
 
+        const clipPolygonAABB = (subjectPolygon, aabb) => {
+            let inputList = subjectPolygon;
+            const clipEdge = (edgeIndex) => {
+                let outList = [];
+                for (let i = 0; i < inputList.length; i++) {
+                    let s = inputList[i], e = inputList[(i + 1) % inputList.length];
+                    let sInside, eInside, intersect;
+                    
+                    if (edgeIndex === 0) { sInside = s.x >= aabb.minX; eInside = e.x >= aabb.minX; intersect = { x: aabb.minX, y: s.y + (e.y - s.y) * (aabb.minX - s.x) / (e.x - s.x) }; } 
+                    else if (edgeIndex === 1) { sInside = s.x <= aabb.maxX; eInside = e.x <= aabb.maxX; intersect = { x: aabb.maxX, y: s.y + (e.y - s.y) * (aabb.maxX - s.x) / (e.x - s.x) }; } 
+                    else if (edgeIndex === 2) { sInside = s.y >= aabb.minY; eInside = e.y >= aabb.minY; intersect = { x: s.x + (e.x - s.x) * (aabb.minY - s.y) / (e.y - s.y), y: aabb.minY }; } 
+                    else if (edgeIndex === 3) { sInside = s.y <= aabb.maxY; eInside = e.y <= aabb.maxY; intersect = { x: s.x + (e.x - s.x) * (aabb.maxY - s.y) / (e.y - s.y), y: aabb.maxY }; }
+                    
+                    if (eInside) { if (!sInside) outList.push(intersect); outList.push(e); } 
+                    else if (sInside) { outList.push(intersect); }
+                }
+                inputList = outList;
+            };
+            for (let i = 0; i < 4; i++) clipEdge(i);
+            return inputList;
+        };
+
         function App() {
             // 1. Medidas del Cuadro Base
             const [width, setWidth] = useState(400); 
@@ -119,8 +141,8 @@
             const [exportSelection, setExportSelection] = useState('single');
             const [exportBase, setExportBase] = useState(true); 
             
-            // 3. Estados del patrón Jigumi Base (MALLA ESTRICTA DE 60°)
-            const [patternMode, setPatternMode] = useState('rows'); // 'perfect', 'cols', 'rows', 'manual'
+            // 3. Estados del patrón Jigumi Base
+            const [patternMode, setPatternMode] = useState('rows'); 
             const [patternCols, setPatternCols] = useState(9); 
             const [patternRows, setPatternRows] = useState(10); 
             const [manualPitch, setManualPitch] = useState(43.5); 
@@ -130,7 +152,7 @@
             const [frameMargin, setFrameMargin] = useState(5); 
             const [mainColor, setMainColor] = useState(WOOD_COLORS[0].hex); 
 
-            // 4. Diseño Libre (INTERACTIVO)
+            // 4. Diseño Libre
             const [designMode, setDesignMode] = useState(false);
             const [activeTool, setActiveTool] = useState('asanoha'); 
             const [activeColor, setActiveColor] = useState(WOOD_COLORS[2].hex); 
@@ -139,7 +161,6 @@
             const [customDesign, setCustomDesign] = useState({}); 
             const customDesignRef = useRef({});
 
-            // Ui State
             const [showConfigModal, setShowConfigModal] = useState(false);
             const [dialog, setDialog] = useState(null); 
             const fileInputRef = useRef(null);
@@ -147,7 +168,6 @@
             const showAlert = (msg) => setDialog({ message: msg, type: 'alert' });
             const showConfirm = (msg, onConfirm) => setDialog({ message: msg, type: 'confirm', onConfirm });
 
-            // Three.js Refs
             const mountRef = useRef(null);
             const sceneRef = useRef(null);
             const cameraRef = useRef(null);
@@ -159,7 +179,6 @@
             const singleMeshRef = useRef(null); 
             const panelsRef = useRef([]);
 
-            // Interacción Refs
             const raycasterRef = useRef(new THREE.Raycaster());
             const mouseRef = useRef(new THREE.Vector2());
             const isPaintingRef = useRef(false);
@@ -167,7 +186,6 @@
             const longPressTimerRef = useRef(null);
             const lastHoveredIdRef = useRef(null);
 
-            // --- LÓGICA MATEMÁTICA CENTRAL DE ENCAJE PERFECTO ---
             const validWidth = Number(width) || 0;
             const validHeight = Number(height) || 0;
             const validInfillThickness = Number(infillThickness) || 1.5;
@@ -186,7 +204,6 @@
             let derivedCols = patternCols;
             let derivedRows = patternRows;
 
-            // En el modo 'perfect', el cuadro se mantiene y el MARCO absorbe la diferencia (Asegurando solapa mínima)
             if (patternMode === 'perfect') {
                 const availableW = Math.max(0, validWidth - validFrameMargin * 2);
                 const availableH = Math.max(0, validHeight - validFrameMargin * 2);
@@ -198,7 +215,6 @@
                 targetInnerH = derivedRows * finalPitch * SQRT3 / 2;
                 
                 if (showBorders) {
-                    // Calculamos la solapa exacta sumando el margen mínimo y el sobrante dividido 2
                     marginX = (actualWidth - targetInnerW) / 2;
                     marginY = (actualHeight - targetInnerH) / 2;
                 }
@@ -218,7 +234,6 @@
             const cellW = finalPitch;
             const cellH = finalPitch * SQRT3 / 2;
 
-            // Calculamos cuántas celdas se necesitan en total
             const gridCols = Math.ceil(targetInnerW / cellW) + 2;
             const gridRows = Math.ceil(targetInnerH / cellH) + 2;
             
@@ -228,7 +243,10 @@
             const innerW = gridCols * cellW;
             const innerH = gridRows * cellH;
 
-            // Inicializar Three.js
+            const getVertex = (k, j, PXm, PYm, cW, cH) => {
+                return new THREE.Vector2(PXm + k * cW + j * (cW / 2), PYm + j * cH);
+            };
+
             useEffect(() => {
                 const containerWidth = mountRef.current.clientWidth;
                 const containerHeight = mountRef.current.clientHeight;
@@ -299,10 +317,6 @@
                 if (controlsRef.current) controlsRef.current.enableRotate = !designMode;
             }, [designMode]);
 
-            const getVertex = (k, j, PXmin, PYmin) => {
-                return new THREE.Vector2(PXmin + k * cellW + j * (cellW / 2), PYmin + j * cellH);
-            };
-
             const buildGeometry = () => {
                 if (!meshGroupRef.current || !hitboxesGroupRef.current || !hasValidDimensions) return;
                 
@@ -339,17 +353,17 @@
 
                 if (designMode) {
                     const hitboxMat = new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0, side: THREE.DoubleSide });
-                    const marginX = cellW;
-                    const marginY = cellH;
+                    const mX = cellW;
+                    const mY = cellH;
 
                     for (let j = 0; j <= gridRows; j++) {
                         for (let k = -gridRows - 2; k <= gridCols + 2; k++) {
-                            let u1 = getVertex(k, j, PXmin, PYmin);
-                            let u2 = getVertex(k+1, j, PXmin, PYmin);
-                            let u3 = getVertex(k, j+1, PXmin, PYmin);
+                            let u1 = getVertex(k, j, PXmin, PYmin, cellW, cellH);
+                            let u2 = getVertex(k+1, j, PXmin, PYmin, cellW, cellH);
+                            let u3 = getVertex(k, j+1, PXmin, PYmin, cellW, cellH);
                             let uC = new THREE.Vector2((u1.x+u2.x+u3.x)/3, (u1.y+u2.y+u3.y)/3);
                             
-                            if (uC.x >= renderMinX - marginX && uC.x <= renderMaxX + marginX && uC.y >= renderMinY - marginY && uC.y <= renderMaxY + marginY) {
+                            if (uC.x >= renderMinX - mX && uC.x <= renderMaxX + mX && uC.y >= renderMinY - mY && uC.y <= renderMaxY + mY) {
                                 const shape = new THREE.Shape();
                                 shape.moveTo(u1.x, u1.y); shape.lineTo(u2.x, u2.y); shape.lineTo(u3.x, u3.y); shape.closePath();
                                 const geo = new THREE.ShapeGeometry(shape);
@@ -358,12 +372,12 @@
                                 hGroup.add(mesh);
                             }
 
-                            let d1 = getVertex(k+1, j, PXmin, PYmin);
-                            let d2 = getVertex(k+1, j+1, PXmin, PYmin);
-                            let d3 = getVertex(k, j+1, PXmin, PYmin);
+                            let d1 = getVertex(k+1, j, PXmin, PYmin, cellW, cellH);
+                            let d2 = getVertex(k+1, j+1, PXmin, PYmin, cellW, cellH);
+                            let d3 = getVertex(k, j+1, PXmin, PYmin, cellW, cellH);
                             let dC = new THREE.Vector2((d1.x+d2.x+d3.x)/3, (d1.y+d2.y+d3.y)/3);
                             
-                            if (dC.x >= renderMinX - marginX && dC.x <= renderMaxX + marginX && dC.y >= renderMinY - marginY && dC.y <= renderMaxY + marginY) {
+                            if (dC.x >= renderMinX - mX && dC.x <= renderMaxX + mX && dC.y >= renderMinY - mY && dC.y <= renderMaxY + mY) {
                                 const shape = new THREE.Shape();
                                 shape.moveTo(d1.x, d1.y); shape.lineTo(d2.x, d2.y); shape.lineTo(d3.x, d3.y); shape.closePath();
                                 const geo = new THREE.ShapeGeometry(shape);
@@ -394,28 +408,6 @@
                     return { A: new THREE.Vector2(x0 + t0 * dx, y0 + t0 * dy), B: new THREE.Vector2(x0 + t1 * dx, y0 + t1 * dy) };
                 }
 
-                function clipPolygonAABB(subjectPolygon, aabb) {
-                    let inputList = subjectPolygon;
-                    const clipEdge = (edgeIndex) => {
-                        let outList = [];
-                        for (let i = 0; i < inputList.length; i++) {
-                            let s = inputList[i], e = inputList[(i + 1) % inputList.length];
-                            let sInside, eInside, intersect;
-                            
-                            if (edgeIndex === 0) { sInside = s.x >= aabb.minX; eInside = e.x >= aabb.minX; intersect = { x: aabb.minX, y: s.y + (e.y - s.y) * (aabb.minX - s.x) / (e.x - s.x) }; } 
-                            else if (edgeIndex === 1) { sInside = s.x <= aabb.maxX; eInside = e.x <= aabb.maxX; intersect = { x: aabb.maxX, y: s.y + (e.y - s.y) * (aabb.maxX - s.x) / (e.x - s.x) }; } 
-                            else if (edgeIndex === 2) { sInside = s.y >= aabb.minY; eInside = e.y >= aabb.minY; intersect = { x: s.x + (e.x - s.x) * (aabb.minY - s.y) / (e.y - s.y), y: aabb.minY }; } 
-                            else if (edgeIndex === 3) { sInside = s.y <= aabb.maxY; eInside = e.y <= aabb.maxY; intersect = { x: s.x + (e.x - s.x) * (aabb.maxY - s.y) / (e.y - s.y), y: aabb.maxY }; }
-                            
-                            if (eInside) { if (!sInside) outList.push(intersect); outList.push(e); } 
-                            else if (sInside) { outList.push(intersect); }
-                        }
-                        inputList = outList;
-                    };
-                    for (let i = 0; i < 4; i++) clipEdge(i);
-                    return inputList;
-                }
-
                 const rawSegments = [];
                 const rawPolygons = [];
 
@@ -435,13 +427,13 @@
                     
                     let orig_v1, orig_v2, orig_v3;
                     if (type === 'U') { 
-                        orig_v1 = getVertex(k, j, PXmin, PYmin); 
-                        orig_v2 = getVertex(k+1, j, PXmin, PYmin); 
-                        orig_v3 = getVertex(k, j+1, PXmin, PYmin); 
+                        orig_v1 = getVertex(k, j, PXmin, PYmin, cellW, cellH); 
+                        orig_v2 = getVertex(k+1, j, PXmin, PYmin, cellW, cellH); 
+                        orig_v3 = getVertex(k, j+1, PXmin, PYmin, cellW, cellH); 
                     } else { 
-                        orig_v1 = getVertex(k+1, j, PXmin, PYmin); 
-                        orig_v2 = getVertex(k+1, j+1, PXmin, PYmin); 
-                        orig_v3 = getVertex(k, j+1, PXmin, PYmin); 
+                        orig_v1 = getVertex(k+1, j, PXmin, PYmin, cellW, cellH); 
+                        orig_v2 = getVertex(k+1, j+1, PXmin, PYmin, cellW, cellH); 
+                        orig_v3 = getVertex(k, j+1, PXmin, PYmin, cellW, cellH); 
                     }
                     
                     let [v1, v2, v3] = getInnerTriangle(orig_v1, orig_v2, orig_v3, thickness, validClearance);
@@ -810,25 +802,99 @@
 
             const bomItems = useMemo(() => {
                 const counts = {};
-                Object.values(customDesign).forEach(d => {
-                    const key = `${d.type}_${d.color}`;
-                    if(!counts[key]) counts[key] = { type: d.type, color: d.color, count: 0 };
+                
+                const GLx = actualWidth / 2;
+                const GLy = actualHeight / 2;
+                const renderMinX = Math.max(-GLx + marginX, -targetInnerW/2);
+                const renderMaxX = Math.min(GLx - marginX, targetInnerW/2);
+                const renderMinY = Math.max(-GLy + marginY, -targetInnerH/2);
+                const renderMaxY = Math.min(GLy - marginY, targetInnerH/2);
+                const PXmin = -innerW / 2;
+                const PYmin = -innerH / 2;
+
+                Object.entries(customDesign).forEach(([id, data]) => {
+                    const parts = id.split('_');
+                    const triType = parts[0], k = parseInt(parts[1]), j = parseInt(parts[2]);
+                    
+                    let orig_v1, orig_v2, orig_v3;
+                    if (triType === 'U') { 
+                        orig_v1 = getVertex(k, j, PXmin, PYmin, cellW, cellH); 
+                        orig_v2 = getVertex(k+1, j, PXmin, PYmin, cellW, cellH); 
+                        orig_v3 = getVertex(k, j+1, PXmin, PYmin, cellW, cellH); 
+                    } else { 
+                        orig_v1 = getVertex(k+1, j, PXmin, PYmin, cellW, cellH); 
+                        orig_v2 = getVertex(k+1, j+1, PXmin, PYmin, cellW, cellH); 
+                        orig_v3 = getVertex(k, j+1, PXmin, PYmin, cellW, cellH); 
+                    }
+                    
+                    let [v1, v2, v3] = getInnerTriangle(orig_v1, orig_v2, orig_v3, thickness, validClearance);
+                    
+                    let minX = Math.min(v1.x, v2.x, v3.x);
+                    let maxX = Math.max(v1.x, v2.x, v3.x);
+                    let minY = Math.min(v1.y, v2.y, v3.y);
+                    let maxY = Math.max(v1.y, v2.y, v3.y);
+                    
+                    let cuts = [];
+                    const eps = 0.5;
+                    if (minX < renderMinX - eps) cuts.push('Izq');
+                    if (maxX > renderMaxX + eps) cuts.push('Der');
+                    if (minY < renderMinY - eps) cuts.push('Inf');
+                    if (maxY > renderMaxY + eps) cuts.push('Sup');
+                    
+                    const pieceOrientation = triType === 'U' ? '▲' : '▼';
+                    const cutSignature = cuts.length === 0 ? 'Entera' : 'Corte ' + cuts.join('-');
+                    const key = `${data.type}_${data.color}_${pieceOrientation}_${cutSignature}`;
+                    
+                    if(!counts[key]) counts[key] = { 
+                        type: data.type, 
+                        color: data.color, 
+                        orientation: pieceOrientation,
+                        cutSignature: cutSignature,
+                        sampleId: id, // Clave: Guardamos un ID de ejemplo para calcar su corte físico exacto
+                        count: 0 
+                    };
                     counts[key].count++;
                 });
-                return Object.values(counts).sort((a,b) => b.count - a.count);
-            }, [customDesign]);
+                
+                return Object.values(counts).sort((a,b) => {
+                    if (a.cutSignature === 'Entera' && b.cutSignature !== 'Entera') return -1;
+                    if (a.cutSignature !== 'Entera' && b.cutSignature === 'Entera') return 1;
+                    return b.count - a.count;
+                });
+            }, [customDesign, actualWidth, actualHeight, targetInnerW, targetInnerH, showBorders, marginX, marginY, thickness, validClearance, innerW, innerH, cellW, cellH]);
 
-            const exportSingleTool = (toolType, toolColor) => {
+            const exportSingleTool = (sampleId, item) => {
                 const scene = new THREE.Scene();
                 
-                let v1_orig = new THREE.Vector2(-cellW/2, -cellH/3);
-                let v2_orig = new THREE.Vector2(cellW/2, -cellH/3);
-                let v3_orig = new THREE.Vector2(0, cellH*2/3);
+                const parts = sampleId.split('_');
+                const triType = parts[0], k = parseInt(parts[1]), j = parseInt(parts[2]);
+                
+                const GLx = actualWidth / 2;
+                const GLy = actualHeight / 2;
+                const renderMinX = Math.max(-GLx + marginX, -targetInnerW/2);
+                const renderMaxX = Math.min(GLx - marginX, targetInnerW/2);
+                const renderMinY = Math.max(-GLy + marginY, -targetInnerH/2);
+                const renderMaxY = Math.min(GLy - marginY, targetInnerH/2);
+                const PXmin = -innerW / 2;
+                const PYmin = -innerH / 2;
 
-                let [v1, v2, v3] = getInnerTriangle(v1_orig, v2_orig, v3_orig, thickness, validClearance);
+                let orig_v1, orig_v2, orig_v3;
+                if (triType === 'U') { 
+                    orig_v1 = getVertex(k, j, PXmin, PYmin, cellW, cellH); 
+                    orig_v2 = getVertex(k+1, j, PXmin, PYmin, cellW, cellH); 
+                    orig_v3 = getVertex(k, j+1, PXmin, PYmin, cellW, cellH); 
+                } else { 
+                    orig_v1 = getVertex(k+1, j, PXmin, PYmin, cellW, cellH); 
+                    orig_v2 = getVertex(k+1, j+1, PXmin, PYmin, cellW, cellH); 
+                    orig_v3 = getVertex(k, j+1, PXmin, PYmin, cellW, cellH); 
+                }
+                
+                let [v1, v2, v3] = getInnerTriangle(orig_v1, orig_v2, orig_v3, thickness, validClearance);
 
-                const rawPolygons = [];
                 const clipperPoly = [v1, v2, v3];
+                const clipBox = { minX: renderMinX, maxX: renderMaxX, minY: renderMinY, maxY: renderMaxY };
+                
+                const rawPolygons = [];
 
                 const addInfill = (A, B) => {
                     let dx = B.x - A.x, dy = B.y - A.y;
@@ -842,9 +908,11 @@
                         new THREE.Vector2(B.x - nx*t, B.y - ny*t),
                         new THREE.Vector2(A.x - nx*t, A.y - ny*t)
                     ];
-                    poly = clipPolygonAgainstConvex(poly, clipperPoly);
+                    poly = clipPolygonAgainstConvex(poly, clipperPoly); // Borde del triángulo
+                    poly = clipPolygonAABB(poly, clipBox); // Borde del marco/cuadro
+                    
                     if (poly.length >= 3) {
-                        rawPolygons.push({ vertices: poly, color: toolColor });
+                        rawPolygons.push(poly);
                     }
                 };
 
@@ -853,17 +921,17 @@
                 let m2 = new THREE.Vector2((v2.x+v3.x)/2, (v2.y+v3.y)/2);
                 let m3 = new THREE.Vector2((v3.x+v1.x)/2, (v3.y+v1.y)/2);
 
-                if (toolType === 'asanoha') {
+                if (item.type === 'asanoha') {
                     addInfill(c, v1); addInfill(c, v2); addInfill(c, v3);
-                } else if (toolType === 'estrella') {
+                } else if (item.type === 'estrella') {
                     addInfill(m1, m2); addInfill(m2, m3); addInfill(m3, m1);
-                } else if (toolType === 'hexagono') {
+                } else if (item.type === 'hexagono') {
                     let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3), p2 = new THREE.Vector2(v1.x/3 + v2.x*2/3, v1.y/3 + v2.y*2/3);
                     let p3 = new THREE.Vector2(v2.x*2/3 + v3.x/3, v2.y*2/3 + v3.y/3), p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
                     let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3), p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
                     addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
                     addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
-                } else if (toolType === 'sakura') {
+                } else if (item.type === 'sakura') {
                     let p1 = new THREE.Vector2(v1.x*2/3 + v2.x/3, v1.y*2/3 + v2.y/3), p2 = new THREE.Vector2(v1.x/3 + v2.x*2/3, v1.y/3 + v2.y*2/3);
                     let p3 = new THREE.Vector2(v2.x*2/3 + v3.x/3, v2.y*2/3 + v3.y/3), p4 = new THREE.Vector2(v2.x/3 + v3.x*2/3, v2.y/3 + v3.y*2/3);
                     let p5 = new THREE.Vector2(v3.x*2/3 + v1.x/3, v3.y*2/3 + v1.y/3), p6 = new THREE.Vector2(v3.x/3 + v1.x*2/3, v3.y/3 + v1.y*2/3);
@@ -872,27 +940,49 @@
                     addInfill(m1, new THREE.Vector2((p1.x+p2.x)/2, (p1.y+p2.y)/2));
                     addInfill(m2, new THREE.Vector2((p3.x+p4.x)/2, (p3.y+p4.y)/2));
                     addInfill(m3, new THREE.Vector2((p5.x+p6.x)/2, (p5.y+p6.y)/2));
-                } else if (toolType === 'kikko') {
+                } else if (item.type === 'kikko') {
                     let p1 = v1.clone().lerp(v2, 1/3), p2 = v1.clone().lerp(v2, 2/3);
                     let p3 = v2.clone().lerp(v3, 1/3), p4 = v2.clone().lerp(v3, 2/3);
                     let p5 = v3.clone().lerp(v1, 1/3), p6 = v3.clone().lerp(v1, 2/3);
                     addInfill(p1, p2); addInfill(p2, p3); addInfill(p3, p4);
                     addInfill(p4, p5); addInfill(p5, p6); addInfill(p6, p1);
                     addInfill(c, p1); addInfill(c, p3); addInfill(c, p5);
-                } else if (toolType === 'goma') {
+                } else if (item.type === 'goma') {
                     addInfill(m1, m3); addInfill(v1, m2);
-                } else if (toolType === 'bishamon') {
+                } else if (item.type === 'bishamon') {
                     addInfill(c, m1); addInfill(c, m2); addInfill(c, m3);
-                } else if (toolType === 'pleno') {
-                    rawPolygons.push({ vertices: [v1, v2, v3], color: toolColor });
+                } else if (item.type === 'pleno') {
+                    let poly = [v1, v2, v3];
+                    poly = clipPolygonAABB(poly, clipBox);
+                    if (poly.length >= 3) rawPolygons.push(poly);
                 }
+
+                let totalMinX = Infinity, totalMaxX = -Infinity;
+                let totalMinY = Infinity, totalMaxY = -Infinity;
+                
+                rawPolygons.forEach(poly => {
+                    poly.forEach(p => {
+                        if (p.x < totalMinX) totalMinX = p.x;
+                        if (p.x > totalMaxX) totalMaxX = p.x;
+                        if (p.y < totalMinY) totalMinY = p.y;
+                        if (p.y > totalMaxY) totalMaxY = p.y;
+                    });
+                });
+
+                if (rawPolygons.length === 0) {
+                    showAlert("Esta pieza está completamente cortada por el marco y no tiene volumen físico.");
+                    return; 
+                }
+
+                const cx = (totalMinX + totalMaxX) / 2;
+                const cy = (totalMinY + totalMaxY) / 2;
 
                 const material = new THREE.MeshBasicMaterial();
 
                 rawPolygons.forEach(poly => {
                     const shape = new THREE.Shape();
-                    shape.moveTo(poly.vertices[0].x, poly.vertices[0].y);
-                    for(let i=1; i<poly.vertices.length; i++) shape.lineTo(poly.vertices[i].x, poly.vertices[i].y);
+                    shape.moveTo(poly[0].x - cx, poly[0].y - cy);
+                    for(let i=1; i<poly.length; i++) shape.lineTo(poly[i].x - cx, poly[i].y - cy);
                     shape.closePath();
                     const geo = new THREE.ExtrudeGeometry(shape, { depth: depth, bevelEnabled: false });
                     geo.translate(0, 0, -depth / 2);
@@ -905,7 +995,8 @@
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
-                link.download = `Kumiko_${toolType}_${Math.round(cellW)}x${Math.round(cellH)}.stl`;
+                const safeName = `${item.type}_${item.orientation === '▲' ? 'U' : 'D'}_${item.cutSignature.replace(/ /g, '_')}`;
+                link.download = `Kumiko_Pieza_${safeName}.stl`;
                 link.click();
             };
 
@@ -1351,17 +1442,21 @@
                                 ) : (
                                     <div className="space-y-1">
                                         {bomItems.map((item, idx) => {
-                                            const colorName = WOOD_COLORS.find(c => c.hex === item.color)?.name || 'Color';
                                             return (
                                                 <div key={idx} className="flex items-center justify-between bg-white p-1 rounded border border-amber-100 shadow-sm text-[10px]">
                                                     <div className="flex items-center gap-1.5">
-                                                        <div className="w-3 h-3 rounded-full border border-gray-300 shadow-inner" style={{backgroundColor: item.color}}></div>
-                                                        <span className="font-bold capitalize">{item.type}</span>
-                                                        <span className="text-gray-500">x{item.count}</span>
+                                                        <div className="w-3 h-3 rounded-full border border-gray-300 shadow-inner shrink-0" style={{backgroundColor: item.color}}></div>
+                                                        <div className="flex flex-col">
+                                                            <span className="font-bold capitalize leading-none text-gray-800">{item.type} <span className="text-[9px] text-gray-500 ml-0.5">{item.orientation}</span></span>
+                                                            {item.cutSignature !== 'Entera' && (
+                                                                <span className="text-[8px] text-red-600 font-bold mt-0.5 leading-none">{item.cutSignature}</span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-gray-500 font-bold ml-1">x{item.count}</span>
                                                     </div>
                                                     <button 
-                                                        onClick={() => exportSingleTool(item.type, item.color)}
-                                                        className="text-amber-600 hover:text-amber-800 font-bold px-1.5 py-0.5 rounded hover:bg-amber-100 transition-colors"
+                                                        onClick={() => exportSingleTool(item.sampleId, item)}
+                                                        className="text-amber-600 hover:text-amber-800 font-bold px-1.5 py-0.5 rounded hover:bg-amber-100 transition-colors shrink-0"
                                                         title="Descargar STL suelto"
                                                     >
                                                         ↓ STL
@@ -1369,7 +1464,7 @@
                                                 </div>
                                             )
                                         })}
-                                        <p className="text-[9px] text-amber-700 mt-2 leading-tight">Las piezas sueltas son idénticas geométricamente. Al ser triángulos equiláteros puros, todas encajan perfecto.</p>
+                                        <p className="text-[8px] text-amber-700 mt-2 leading-tight">Las piezas detectadas como recortes se descargarán con su forma exacta de corte para encajar en el marco.</p>
                                     </div>
                                 )}
                             </section>
