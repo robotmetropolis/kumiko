@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador Kumiko Interactivo Pro V4</title>
+    <title>Generador Kumiko Interactivo Pro V5</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
@@ -968,7 +968,7 @@
                     if (poly.length >= 3) rawPolygons.push(poly);
                 };
 
-                drawPattern(item.type, v1, v2, v3, addInfill, addPolygon, toolColor);
+                drawPattern(item.type, v1, v2, v3, addInfill, addPolygon, item.color);
 
                 let totalMinX = Infinity, totalMaxX = -Infinity;
                 let totalMinY = Infinity, totalMaxY = -Infinity;
