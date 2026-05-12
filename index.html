@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador Kumiko Interactivo Pro V4.2</title>
+    <title>Generador Kumiko Interactivo Pro V4.3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
@@ -800,6 +800,7 @@
                 });
             };
 
+            // Lógica Central de Detección de Piezas Cortadas (BOM Inteligente)
             const bomItems = useMemo(() => {
                 const counts = {};
                 
@@ -841,14 +842,21 @@
                     if (minY < renderMinY - eps) cuts.push('Inf');
                     if (maxY > renderMaxY + eps) cuts.push('Sup');
                     
+                    // CORRECCIÓN: Si es ENTERA, ignoramos la orientación porque es una pieza rotacionalmente simétrica.
+                    const isCut = cuts.length > 0;
                     const pieceOrientation = triType === 'U' ? '▲' : '▼';
-                    const cutSignature = cuts.length === 0 ? 'Entera' : 'Corte ' + cuts.join('-');
-                    const key = `${data.type}_${data.color}_${pieceOrientation}_${cutSignature}`;
+                    const cutSignature = isCut ? 'Corte ' + cuts.join('-') : 'Entera';
+                    
+                    // La clave de agrupación solo incluye la orientación si la pieza está cortada
+                    const key = isCut 
+                        ? `${data.type}_${data.color}_${pieceOrientation}_${cutSignature}`
+                        : `${data.type}_${data.color}_Entera`;
                     
                     if(!counts[key]) counts[key] = { 
                         type: data.type, 
                         color: data.color, 
-                        orientation: pieceOrientation,
+                        // Solo mostramos la flecha en la UI si importa la orientación
+                        orientation: isCut ? pieceOrientation : '',
                         cutSignature: cutSignature,
                         sampleId: id, // Clave: Guardamos un ID de ejemplo para calcar su corte físico exacto
                         count: 0 
@@ -863,6 +871,7 @@
                 });
             }, [customDesign, actualWidth, actualHeight, targetInnerW, targetInnerH, showBorders, marginX, marginY, thickness, validClearance, innerW, innerH, cellW, cellH]);
 
+            // Generador Inteligente de STL a Medida según recorte
             const exportSingleTool = (sampleId, item) => {
                 const scene = new THREE.Scene();
                 
@@ -1447,7 +1456,9 @@
                                                     <div className="flex items-center gap-1.5">
                                                         <div className="w-3 h-3 rounded-full border border-gray-300 shadow-inner shrink-0" style={{backgroundColor: item.color}}></div>
                                                         <div className="flex flex-col">
-                                                            <span className="font-bold capitalize leading-none text-gray-800">{item.type} <span className="text-[9px] text-gray-500 ml-0.5">{item.orientation}</span></span>
+                                                            <span className="font-bold capitalize leading-none text-gray-800">
+                                                                {item.type} {item.orientation && <span className="text-[9px] text-gray-500 ml-0.5">{item.orientation}</span>}
+                                                            </span>
                                                             {item.cutSignature !== 'Entera' && (
                                                                 <span className="text-[8px] text-red-600 font-bold mt-0.5 leading-none">{item.cutSignature}</span>
                                                             )}
@@ -1464,7 +1475,7 @@
                                                 </div>
                                             )
                                         })}
-                                        <p className="text-[8px] text-amber-700 mt-2 leading-tight">Las piezas detectadas como recortes se descargarán con su forma exacta de corte para encajar en el marco.</p>
+                                        <p className="text-[8px] text-amber-700 mt-2 leading-tight">Las piezas enteras son idénticas al rotarlas, por lo que se agrupan. Las piezas cortadas se separan según su forma exacta.</p>
                                     </div>
                                 )}
                             </section>
