@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador Kumiko Interactivo Pro V4</title>
+    <title>Generador Kumiko Interactivo Pro V4.1</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
@@ -120,9 +120,9 @@
             const [exportBase, setExportBase] = useState(true); 
             
             // 3. Estados del patrón Jigumi Base (MALLA ESTRICTA DE 60°)
-            const [patternMode, setPatternMode] = useState('perfect'); // 'perfect', 'cols', 'rows', 'manual'
+            const [patternMode, setPatternMode] = useState('rows'); // 'perfect', 'cols', 'rows', 'manual'
             const [patternCols, setPatternCols] = useState(9); 
-            const [patternRows, setPatternRows] = useState(13); 
+            const [patternRows, setPatternRows] = useState(10); 
             const [manualPitch, setManualPitch] = useState(43.5); 
             const [thickness, setThickness] = useState(3);          
             const [depth, setDepth] = useState(5);
